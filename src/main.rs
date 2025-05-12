@@ -1,53 +1,38 @@
-use dotenv::dotenv;
-use mongodb::{Client, bson::doc, options::ClientOptions};
-use serde::Deserialize;
-use std::env;
-use tokio;
+use actix_web::{App, HttpServer, web};
+use mongodb::{Client, options::ClientOptions};
 
-#[derive(Debug, Deserialize)]
-pub struct AppConfig {
-    pub database_name: String,
-    pub database_username: String,
-    pub database_password: String,
-    pub database_conn_url: String,
-}
+mod config;
+mod routes;
 
-fn load_config() -> AppConfig {
-    // Load environment variables from the .env file
-    dotenv().ok();
-
-    AppConfig {
-        database_name: env::var("DATABASE_NAME")
-            .expect("SERVER_HOST not set")
-            .to_string(),
-        database_username: env::var("DATABASE_USERNAME")
-            .expect("DATABASE_USERNAME not set")
-            .to_string(),
-        database_password: env::var("DATABASE_PASSWORD")
-            .expect("DATABASE_PASSWORD not set")
-            .to_string(),
-        database_conn_url: env::var("DATABASE_CONN_URL")
-            .expect("DATABASE_CONN_URL not set")
-            .to_string(),
+pub mod shared {
+    #[derive(Clone)]
+    pub struct AppState {
+        pub config: crate::config::AppConfig,
+        pub db_client: mongodb::Client,
     }
 }
 
-#[tokio::main]
-async fn main() -> mongodb::error::Result<()> {
-    let config = load_config();
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    let config = config::load_config();
 
-    // Configure the MongoDB client
-    let options = ClientOptions::parse(config.database_conn_url).await?;
-    let client = Client::with_options(options)?;
+    let options = ClientOptions::parse(&config.database_conn_url)
+        .await
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let db_client = Client::with_options(options)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-    // Access a database and collection
-    let database = client.database(&config.database_name);
+    println!("Successfully connected to MongoDB!");
 
-    // Ping the database
-    let resp = database.run_command(doc! { "ping": 1 }).await?;
-    println!(
-        "Pinged your deployment. You successfully connected to MongoDB!: {}",
-        resp.to_string()
-    );
-    Ok(())
+    HttpServer::new(move || {
+        App::new()
+            .app_data(web::Data::new(crate::shared::AppState {
+                config: config.clone(),
+                db_client: db_client.clone(),
+            }))
+            .configure(routes::configure)
+    })
+    .bind(("127.0.0.1", 8080))?
+    .run()
+    .await
 }
