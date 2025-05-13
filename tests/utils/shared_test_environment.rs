@@ -1,12 +1,10 @@
-use mongodb::{Client, bson::Document, options::ClientOptions};
-use reqwest::blocking::Client as ReqwestClient;
-use std::fs;
-use std::path::Path;
+use mongodb::{Client, bson::Document};
 use std::process::{Child, Command};
-use std::sync::{Mutex, Once};
+use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
 use tokio::runtime::Runtime;
+
+use crate::utils::utils;
 
 // Test environment configuration
 #[derive(Clone)]
@@ -32,18 +30,79 @@ impl Default for TestConfig {
 
 // Create a static Tokio runtime for database operations
 lazy_static::lazy_static! {
-    static ref TOKIO_RUNTIME: Runtime = Runtime::new().expect("Failed to create Tokio runtime");
-    static ref SHARED_MONGODB: Mutex<Option<SharedMongoDB>> = Mutex::new(None);
-    static ref INIT_MONGODB: Once = Once::new();
-    static ref CLEANUP_MONGODB: Once = Once::new();
-    static ref SETUP_DONE: Once = Once::new();
+    pub static ref TOKIO_RUNTIME: Runtime = Runtime::new().expect("Failed to create Tokio runtime");
+    static ref MONGODB_ACTOR: MongoDBActorHandle = MongoDBActorHandle::new();
 }
 
-// Struct to hold the MongoDB process and client
-struct SharedMongoDB {
-    process: Child,
-    client: Client,
-    config: TestConfig,
+// Simple actor for MongoDB management
+struct MongoDBActorHandle {
+    sender: mpsc::Sender<MongoDBActorMessage>,
+}
+
+// Messages for the MongoDB actor
+enum MongoDBActorMessage {
+    GetClient(mpsc::Sender<(Client, TestConfig)>),
+    Shutdown,
+}
+
+impl MongoDBActorHandle {
+    fn new() -> Self {
+        let (sender, receiver) = mpsc::channel();
+
+        // Spawn the actor in a separate thread
+        thread::spawn(move || {
+            let config = TestConfig::default();
+            let mut process: Option<Child> = None;
+            let mut client: Option<Client> = None;
+
+            // Actor message loop
+            while let Ok(msg) = receiver.recv() {
+                match msg {
+                    MongoDBActorMessage::GetClient(response) => {
+                        // Initialize MongoDB if needed
+                        if client.is_none() {
+                            let (mongodb_process, mongodb_client) =
+                                utils::initialize_mongodb(&config);
+                            process = Some(mongodb_process);
+                            client = Some(mongodb_client);
+                        }
+
+                        // Send the client and config back
+                        response
+                            .send((client.as_ref().unwrap().clone(), config.clone()))
+                            .expect("Failed to send client and config");
+                    }
+                    MongoDBActorMessage::Shutdown => {
+                        // Clean up MongoDB
+                        if let Some(mut p) = process.take() {
+                            utils::cleanup_mongodb(&mut p, &config);
+                        }
+                        break; // Exit the actor loop
+                    }
+                }
+            }
+        });
+
+        MongoDBActorHandle { sender }
+    }
+
+    fn get_client(&self) -> (Client, TestConfig) {
+        // Note: We need to create a new channel here because we need to receive the Client
+        // from the actor. In shutdown(), we don't need to receive anything back.
+        let (sender, receiver) = mpsc::channel();
+        self.sender
+            .send(MongoDBActorMessage::GetClient(sender))
+            .expect("MongoDB actor has died");
+        receiver
+            .recv()
+            .expect("Failed to receive MongoDB client and config")
+    }
+
+    fn shutdown(&self) {
+        self.sender
+            .send(MongoDBActorMessage::Shutdown)
+            .expect("MongoDB actor has died");
+    }
 }
 
 // Shared test environment that reuses the MongoDB instance
@@ -59,32 +118,38 @@ impl SharedTestEnvironment {
     }
 
     pub fn with_config(config: TestConfig) -> Self {
-        // Initialize MongoDB if it's not already running
-        initialize_mongodb(&config);
-
-        // Get a reference to the MongoDB client
-        let mongodb_client = get_mongodb_client();
+        // Get a client and config from the MongoDB actor (this will initialize MongoDB if needed)
+        let (mongodb_client, actor_config) = MONGODB_ACTOR.get_client();
 
         // Start our application with environment variables
         println!("Starting application server...");
-        let mongodb_uri = format!("mongodb://localhost:{}", config.mongodb_port);
+        let mongodb_uri = format!("mongodb://localhost:{}", actor_config.mongodb_port);
 
         // Use Command::new with environment variables
         let app_process = Command::new("cargo")
             .args(["run", "--", "--port", &config.app_port.to_string()])
             .env("DATABASE_CONN_URL", &mongodb_uri)
-            .env("DATABASE_NAME", &config.database_name)
+            .env("DATABASE_NAME", &actor_config.database_name)
             .spawn()
             .expect("Failed to start application server");
 
         // Wait for our application to start
-        wait_for_tcp_port(config.app_port);
+        utils::wait_for_tcp_port(config.app_port);
         println!("Application server started successfully");
+
+        // Use the actor's config for MongoDB-related settings, but keep the app_port from the provided config
+        let combined_config = TestConfig {
+            mongodb_port: actor_config.mongodb_port,
+            mongodb_data_dir: actor_config.mongodb_data_dir,
+            mongodb_log_path: actor_config.mongodb_log_path,
+            database_name: actor_config.database_name,
+            app_port: config.app_port,
+        };
 
         SharedTestEnvironment {
             app_process,
             mongodb_client,
-            config,
+            config: combined_config,
         }
     }
 
@@ -127,174 +192,8 @@ impl Drop for SharedTestEnvironment {
             .kill()
             .expect("Failed to stop application server");
 
-        // Schedule cleanup to run once when all tests are done
-        CLEANUP_MONGODB.call_once(|| {
-            cleanup_mongodb();
-        });
+        // Shutdown MongoDB when the last test environment is dropped
+        // The actor model ensures this happens only once
+        MONGODB_ACTOR.shutdown();
     }
-}
-
-// Initialize MongoDB if it's not already running
-fn initialize_mongodb(config: &TestConfig) {
-    INIT_MONGODB.call_once(|| {
-        // Create data directory if it doesn't exist
-        if !Path::new(&config.mongodb_data_dir).exists() {
-            fs::create_dir_all(&config.mongodb_data_dir)
-                .expect("Failed to create MongoDB data directory");
-        }
-
-        // Start MongoDB
-        println!("Starting shared MongoDB instance...");
-        let mongodb_process = Command::new("mongod")
-            .args([
-                "--port",
-                &config.mongodb_port.to_string(),
-                "--dbpath",
-                &config.mongodb_data_dir,
-                "--logpath",
-                &config.mongodb_log_path,
-                "--fork", // Run in background
-                "--bind_ip",
-                "127.0.0.1",
-            ])
-            .spawn()
-            .expect("Failed to start MongoDB");
-
-        // Wait for MongoDB to start
-        wait_for_tcp_port(config.mongodb_port);
-        println!("Shared MongoDB instance started successfully");
-
-        // Initialize MongoDB client
-        let mongodb_uri = format!("mongodb://localhost:{}", config.mongodb_port);
-        let mongodb_client = TOKIO_RUNTIME.block_on(async {
-            let client_options = ClientOptions::parse(&mongodb_uri)
-                .await
-                .expect("Failed to parse MongoDB connection string");
-
-            Client::with_options(client_options).expect("Failed to connect to MongoDB")
-        });
-
-        // Store the MongoDB process and client
-        let mut shared_mongodb = SHARED_MONGODB.lock().unwrap();
-        *shared_mongodb = Some(SharedMongoDB {
-            process: mongodb_process,
-            client: mongodb_client.clone(),
-            config: config.clone(),
-        });
-
-        // Run database setup (drop the database to start with a clean state)
-        SETUP_DONE.call_once(|| {
-            TOKIO_RUNTIME.block_on(async {
-                println!(
-                    "Dropping database {} for initial setup",
-                    config.database_name
-                );
-                mongodb_client
-                    .database(&config.database_name)
-                    .drop()
-                    .await
-                    .expect("Failed to drop database");
-                println!("Database {} dropped successfully", config.database_name);
-            });
-            println!("Database setup complete - dropped database before tests");
-        });
-    });
-}
-
-// Get a reference to the MongoDB client
-fn get_mongodb_client() -> Client {
-    let shared_mongodb = SHARED_MONGODB.lock().unwrap();
-    match &*shared_mongodb {
-        Some(mongodb) => mongodb.client.clone(),
-        None => panic!("MongoDB not initialized"),
-    }
-}
-
-// Clean up MongoDB
-fn cleanup_mongodb() {
-    let mut shared_mongodb = SHARED_MONGODB.lock().unwrap();
-    if let Some(mut mongodb) = shared_mongodb.take() {
-        // Stop MongoDB
-        println!("Stopping shared MongoDB instance...");
-        mongodb.process.kill().expect("Failed to stop MongoDB");
-
-        // Clean up MongoDB data directory
-        println!("Cleaning up test data...");
-
-        // Wait a moment to ensure MongoDB has fully released the files
-        std::thread::sleep(std::time::Duration::from_millis(500));
-
-        // Remove data directory if it exists
-        if Path::new(&mongodb.config.mongodb_data_dir).exists() {
-            // Try multiple times with a delay between attempts
-            for attempt in 1..=5 {
-                match fs::remove_dir_all(&mongodb.config.mongodb_data_dir) {
-                    Ok(_) => {
-                        println!("Successfully removed MongoDB data directory");
-                        break;
-                    }
-                    Err(e) => {
-                        if attempt == 5 {
-                            println!("Warning: Failed to remove MongoDB data directory: {}", e);
-                        } else {
-                            println!(
-                                "Attempt {} to remove data directory failed, retrying...",
-                                attempt
-                            );
-                            std::thread::sleep(std::time::Duration::from_millis(500));
-                        }
-                    }
-                }
-            }
-        }
-
-        // Remove log file if it exists
-        if Path::new(&mongodb.config.mongodb_log_path).exists() {
-            match fs::remove_file(&mongodb.config.mongodb_log_path) {
-                Ok(_) => println!("Successfully removed MongoDB log file"),
-                Err(e) => println!("Warning: Failed to remove MongoDB log file: {}", e),
-            }
-        }
-    }
-}
-
-pub fn wait_for_tcp_port(port: u16) {
-    let url = format!("http://127.0.0.1:{}", port);
-    let client = ReqwestClient::new();
-    let max_attempts = 30;
-    let mut attempts = 0;
-
-    while attempts < max_attempts {
-        match client.get(&url).timeout(Duration::from_secs(1)).send() {
-            Ok(_) => return,
-            Err(_) => {
-                attempts += 1;
-                thread::sleep(Duration::from_secs(1));
-            }
-        }
-    }
-
-    panic!("Timed out waiting for port {} to be available", port);
-}
-
-// Make HTTP request to the test server
-pub fn make_http_request(path: &str) -> (u16, String) {
-    // Use the default test config
-    make_http_request_with_port(path, TestConfig::default().app_port)
-}
-
-// Make HTTP request to a specific port
-pub fn make_http_request_with_port(path: &str, port: u16) -> (u16, String) {
-    let url = format!("http://127.0.0.1:{}{}", port, path);
-    let client = ReqwestClient::new();
-
-    let response = client
-        .get(&url)
-        .send()
-        .expect("Failed to send HTTP request");
-
-    let status_code = response.status().as_u16();
-    let body = response.text().expect("Failed to read HTTP response");
-
-    (status_code, body)
 }

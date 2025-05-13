@@ -1,9 +1,10 @@
 use mongodb::bson::{Document, doc};
 use serde_json;
 
-// Import test environment from utils module
+// Import test environment and utilities from utils module
 mod utils;
-use utils::shared_test_environment::{SharedTestEnvironment, make_http_request};
+use utils::shared_test_environment::SharedTestEnvironment;
+use utils::utils::make_http_request;
 
 // Base name for test collections
 static TEST_COLLECTION_BASE_NAME: &str = "mongor_get_endpoint_test";
