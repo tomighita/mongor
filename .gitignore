@@ -4,6 +4,5 @@
 ## Build
 /target
 
-# Log path for end to end tests
-mongodb_test.*
-metrics.*
+# db files created by tests
+test-dbpath/

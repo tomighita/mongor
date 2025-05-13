@@ -26,16 +26,12 @@ pub mod shared {
 async fn main() -> std::io::Result<()> {
     // Parse command line arguments
     let args: Vec<String> = env::args().collect();
-    let mut port = 8080; // Default port
-
-    // Check for --port argument
-    for i in 0..args.len() {
-        if args[i] == "--port" && i + 1 < args.len() {
-            if let Ok(p) = args[i + 1].parse::<u16>() {
-                port = p;
-            }
-        }
-    }
+    let port = args
+        .iter()
+        .position(|arg| arg == "--port")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|port_str| port_str.parse::<u16>().ok())
+        .unwrap_or(8080);
 
     let config = config::load_config();
 
