@@ -1,13 +1,10 @@
 use actix_web::{App, HttpServer, rt::System, web};
 use mongodb::{Client, options::ClientOptions};
-<<<<<<< HEAD
+use std::env;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use utoipa::{OpenApi, openapi};
 use utoipa_swagger_ui::SwaggerUi;
-=======
-use std::env;
->>>>>>> origin/main
 
 mod catalog;
 mod config;
