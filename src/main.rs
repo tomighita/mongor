@@ -2,9 +2,12 @@ use actix_web::{App, HttpServer, rt::System, web};
 use mongodb::{Client, options::ClientOptions};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use utoipa::{OpenApi, openapi};
+use utoipa_swagger_ui::SwaggerUi;
 
 mod catalog;
 mod config;
+mod openapi_docs;
 mod routes;
 
 pub mod shared {
@@ -43,12 +46,18 @@ async fn main() -> std::io::Result<()> {
     // Spawn a background task to periodically fetch catalog
     actix_web::rt::spawn(catalog::fetch_collections_periodically(
         app_state.clone(),
-        Duration::from_secs(5),
+        Duration::from_secs(60),
     ));
 
     HttpServer::new(move || {
         App::new()
             .app_data(app_state.clone())
+            // Add Swagger UI with a dynamic path to the OpenAPI JSON
+            .service(crate::openapi_docs::get_openapi_json)
+            .service(
+                SwaggerUi::new("/swagger-ui/{_:.*}")
+                    .url("/openapi.json", openapi_docs::ApiDoc::openapi()),
+            )
             .configure(routes::configure)
     })
     .bind(("127.0.0.1", 8080))?

@@ -7,7 +7,7 @@ use crate::shared::AppState;
 
 #[derive(Debug, Clone)]
 pub struct Catalog {
-    collection_specs: Vec<CollectionSpecification>,
+    pub collection_specs: Vec<CollectionSpecification>,
 }
 
 /// Fetches all collections from the MongoDB database and their contents
