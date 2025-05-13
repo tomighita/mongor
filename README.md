@@ -44,11 +44,6 @@ cargo build --release
 ./target/release/mongor
 ```
 
-### Using Docker
-
-```
-docker build -t mongor .
-docker run -p 8080:8080 --env-file .env mongor
 ```
 
 ## API Usage Examples
@@ -138,34 +133,4 @@ Configuration is done through environment variables or a `.env` file:
 Mongor delivers exceptional performance due to its Rust implementation and optimized database connection pooling:
 
 - Handles 10,000+ requests/second on modest hardware
-- Low memory footprint (typically <50MB RAM)
-- Connection pooling for efficient resource utilization
-- Non-blocking async I/O throughout the stack
-
-## Security Considerations
-
-- Always run behind a reverse proxy (nginx, etc.) in production
-- Set up proper authentication with JWT tokens
-- Use HTTPS in production environments
-- Implement proper access control for sensitive collections
-- Be cautious with allowing public access to aggregation pipelines
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- The Rust community for awesome tools and libraries
-- MongoDB for their excellent database and driver
-- Actix-web for the high-performance web framework
+- Low memory footprint (typically
