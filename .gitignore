@@ -3,3 +3,7 @@
 
 ## Build
 /target
+
+# Log path for end to end tests
+mongodb_test.*
+metrics.*
