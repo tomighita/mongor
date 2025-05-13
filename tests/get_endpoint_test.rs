@@ -1,10 +1,9 @@
 use mongodb::bson::{Document, doc};
 use serde_json;
 
-// Import test environment and test utilities from utils module
+// Import test environment from utils module
 mod utils;
-use utils::test_environment::{TestEnvironment, make_http_request};
-use utils::test_utils;
+use utils::shared_test_environment::{SharedTestEnvironment, make_http_request};
 
 // Base name for test collections
 static TEST_COLLECTION_BASE_NAME: &str = "mongor_get_endpoint_test";
@@ -21,7 +20,7 @@ fn unique_collection_name(test_name: &str) -> String {
 /// Run a query endpoint test with the given parameters
 ///
 /// This function:
-/// 1. Ensures the database is set up properly
+/// 1. Uses the shared test environment (which ensures the database is set up properly)
 /// 2. Creates a collection with a unique name and inserts test documents
 /// 3. Makes a request to the endpoint
 /// 4. Verifies the response matches the expected documents
@@ -31,11 +30,8 @@ fn run_get_endpoint_test(
     test_documents: Vec<Document>,
     expected_documents: Vec<Document>,
 ) {
-    // Create test environment
-    let env = TestEnvironment::new();
-
-    // Run setup before tests
-    test_utils::setup(&env.mongodb_client, &env.config.database_name);
+    // Create test environment (setup is done automatically during initialization)
+    let env = SharedTestEnvironment::new();
 
     // Generate a unique collection name for this test
     let collection_name = unique_collection_name(test_name);
@@ -64,8 +60,8 @@ fn run_get_endpoint_test(
         "Documents don't match expected values"
     );
 
-    // Run teardown after tests
-    test_utils::teardown(&env.mongodb_client, &env.config.database_name);
+    // We don't need to run teardown after each test since we're using a shared MongoDB instance
+    // The database will be cleaned up when all tests are done
 }
 
 #[test]

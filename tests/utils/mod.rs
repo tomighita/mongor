@@ -1,3 +1,2 @@
-// Export the test environment and test utilities
-pub mod test_environment;
-pub mod test_utils;
+// Export the shared test environment
+pub mod shared_test_environment;
