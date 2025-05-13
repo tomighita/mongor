@@ -15,18 +15,27 @@ pub fn load_config() -> AppConfig {
     // Load environment variables from the .env file
     dotenv().ok();
 
+    // Use sensible defaults if environment variables are not set
+    let database_name = env::var("DATABASE_NAME").unwrap_or_else(|_| "test".to_string());
+    let database_username = env::var("DATABASE_USERNAME").unwrap_or_else(|_| "".to_string());
+    let database_password = env::var("DATABASE_PASSWORD").unwrap_or_else(|_| "".to_string());
+
+    // Build connection URL with or without credentials
+    let database_conn_url = env::var("DATABASE_CONN_URL").unwrap_or_else(|_| {
+        if database_username.is_empty() || database_password.is_empty() {
+            "mongodb://localhost:27017".to_string()
+        } else {
+            format!(
+                "mongodb://{}:{}@localhost:27017",
+                database_username, database_password
+            )
+        }
+    });
+
     AppConfig {
-        database_name: env::var("DATABASE_NAME")
-            .expect("SERVER_HOST not set")
-            .to_string(),
-        database_username: env::var("DATABASE_USERNAME")
-            .expect("DATABASE_USERNAME not set")
-            .to_string(),
-        database_password: env::var("DATABASE_PASSWORD")
-            .expect("DATABASE_PASSWORD not set")
-            .to_string(),
-        database_conn_url: env::var("DATABASE_CONN_URL")
-            .expect("DATABASE_CONN_URL not set")
-            .to_string(),
+        database_name,
+        database_username,
+        database_password,
+        database_conn_url,
     }
 }
