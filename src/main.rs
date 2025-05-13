@@ -1,9 +1,13 @@
 use actix_web::{App, HttpServer, rt::System, web};
 use mongodb::{Client, options::ClientOptions};
+<<<<<<< HEAD
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use utoipa::{OpenApi, openapi};
 use utoipa_swagger_ui::SwaggerUi;
+=======
+use std::env;
+>>>>>>> origin/main
 
 mod catalog;
 mod config;
@@ -23,6 +27,19 @@ pub mod shared {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // Parse command line arguments
+    let args: Vec<String> = env::args().collect();
+    let mut port = 8080; // Default port
+
+    // Check for --port argument
+    for i in 0..args.len() {
+        if args[i] == "--port" && i + 1 < args.len() {
+            if let Ok(p) = args[i + 1].parse::<u16>() {
+                port = p;
+            }
+        }
+    }
+
     let config = config::load_config();
 
     let options = ClientOptions::parse(&config.database_conn_url)
@@ -31,6 +48,7 @@ async fn main() -> std::io::Result<()> {
     let db_client = Client::with_options(options).expect("failed to create client");
 
     println!("Successfully connected to MongoDB!");
+    println!("Starting server on port {}", port);
 
     let init_catalog = catalog::fetch_all_collections(&db_client.database(&config.database_name))
         .await
@@ -60,7 +78,7 @@ async fn main() -> std::io::Result<()> {
             )
             .configure(routes::configure)
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("127.0.0.1", port))?
     .run()
     .await
 }
