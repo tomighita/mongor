@@ -1,14 +1,15 @@
-use actix_web::{App, HttpServer, rt::System, web};
+use actix_web::{App, HttpServer, web};
 use mongodb::{Client, options::ClientOptions};
 use std::env;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use utoipa::{OpenApi, openapi};
+use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 mod catalog;
 mod config;
 mod openapi_docs;
+mod parser;
 mod routes;
 
 pub mod shared {
@@ -26,16 +27,12 @@ pub mod shared {
 async fn main() -> std::io::Result<()> {
     // Parse command line arguments
     let args: Vec<String> = env::args().collect();
-    let mut port = 8080; // Default port
-
-    // Check for --port argument
-    for i in 0..args.len() {
-        if args[i] == "--port" && i + 1 < args.len() {
-            if let Ok(p) = args[i + 1].parse::<u16>() {
-                port = p;
-            }
-        }
-    }
+    let port = args
+        .iter()
+        .position(|arg| arg == "--port")
+        .and_then(|i| args.get(i + 1))
+        .and_then(|port_str| port_str.parse::<u16>().ok())
+        .unwrap_or(8080);
 
     let config = config::load_config();
 
