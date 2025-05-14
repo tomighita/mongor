@@ -227,67 +227,22 @@ fn test_put_upsert_new_document() {
         "tags": ["new", "upsert"]
     };
 
-    // We don't need to define the expected document structure here
-    // since we'll check the specific fields directly
+    // Expected document after upsert
+    // We only specify the fields we want to verify
+    let expected_doc = doc! {
+        "name": "upserted document",
+        "value": 200,
+        "tags": ["new", "upsert"]
+    };
 
-    // Create test environment (starts MongoDB and app)
-    let env = TestEnvironment::new();
-
-    // Generate a unique collection name for this test
-    let collection_name = unique_collection_name("upsert_new_document");
-
-    // Create an empty collection
-    env.insert_test_data(&collection_name, Vec::new());
-
-    // Convert document to JSON string for the request
-    let json_body = serde_json::to_string(&new_doc).expect("Failed to convert document to JSON");
-
-    // Make a PUT request with a filter that won't match any existing documents
-    let full_request_path = format!("/{}?non_existent_id=999", collection_name);
-    let (status_code, body) = make_put_request(&full_request_path, &json_body);
-
-    // Verify the response status code is 201 (Created) for upsert
-    assert_eq!(
-        status_code, 201,
-        "Expected status code 201 for upsert, got {}",
-        status_code
+    // Run the test with an empty initial collection
+    // The filter query uses a field that doesn't exist to ensure upsert creates a new document
+    run_update_endpoint_test(
+        "upsert_new_document",
+        Vec::new(),             // No initial documents
+        "?non_existent_id=999", // Filter that won't match any documents
+        new_doc,
+        vec![expected_doc], // Expect one document with our fields
+        false,              // use PUT
     );
-
-    // Parse the response to get the update result
-    let update_result: serde_json::Value =
-        serde_json::from_str(&body).expect("Failed to parse update result");
-
-    // Verify that a document was upserted
-    assert!(
-        update_result["upsertedId"].is_object(),
-        "Expected upsertedId for a new document"
-    );
-
-    // Now make a GET request to verify the document was inserted
-    let get_path = format!("/{}", collection_name);
-    let (get_status_code, get_body) = make_http_request(&get_path);
-
-    // Verify the GET response
-    assert_eq!(
-        get_status_code, 200,
-        "Expected GET status code 200, got {}",
-        get_status_code
-    );
-
-    // Parse the JSON response into BSON documents
-    let documents: Vec<Document> =
-        serde_json::from_str(&get_body).expect("Failed to parse JSON response");
-
-    // Verify one document was created
-    assert_eq!(
-        documents.len(),
-        1,
-        "Expected 1 document, got {}",
-        documents.len()
-    );
-
-    // Verify the document contains our expected fields
-    let doc = &documents[0];
-    assert_eq!(doc.get_str("name").unwrap(), "upserted document");
-    assert_eq!(doc.get_i32("value").unwrap(), 200);
 }
