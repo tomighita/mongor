@@ -1,29 +1,30 @@
-use mongodb::bson::{Bson, Document, bson};
+use mongodb::bson::{Bson, bson};
 
 type Number = f64;
 
 #[derive(Debug, Clone)]
-pub enum Operand {
+pub enum Value {
     Str(String),
     Num(Number),
 }
 
-impl PartialEq for Operand {
+impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Operand::Str(a), Operand::Str(b)) => a == b,
-            (Operand::Num(a), Operand::Num(b)) => a == b,
+            (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::Num(a), Value::Num(b)) => a == b,
             _ => false,
         }
     }
 }
-impl Eq for Operand {}
+impl Eq for Value {}
 
 #[derive(Debug, Clone)]
 pub enum LexItem {
-    Operator(String),  // 'eq', 'ne', 'lt', 'gt', 'lte', 'gte'
-    SpecialChar(char), // Specoal characters like `(` `)` `,` `.`
-    Operand(Operand),
+    ComparisonOperator(String), // 'eq', 'ne', 'lt', 'gt', 'lte', 'gte'
+    SpecialChar(char),          // Specoal characters like `(` `)` `,` `.`
+    ArrayOp(String),            // "and", "or"
+    Symbol(Value),              // Number, String
 }
 
 pub struct Lexer {
@@ -34,9 +35,9 @@ pub struct Lexer {
 impl PartialEq for LexItem {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (LexItem::Operator(a), LexItem::Operator(b)) => a == b,
+            (LexItem::ComparisonOperator(a), LexItem::ComparisonOperator(b)) => a == b,
             (LexItem::SpecialChar(a), LexItem::SpecialChar(b)) => a == b,
-            (LexItem::Operand(a), LexItem::Operand(b)) => a == b,
+            (LexItem::Symbol(a), LexItem::Symbol(b)) => a == b,
             _ => false,
         }
     }
@@ -65,11 +66,11 @@ impl Lexer {
         result
     }
 
-    fn read_identifier(&mut self) -> String {
+    fn read_symbol(&mut self) -> String {
         let mut result = String::new();
 
         while let Some(c) = self.peek() {
-            if c.is_alphanumeric() || c == '_' {
+            if c.is_alphanumeric() {
                 result.push(self.next_char().unwrap());
             } else {
                 break;
@@ -128,17 +129,17 @@ impl Lexer {
         self.peek().map(|c| {
             match c {
                 '(' | ')' | ',' | '.' => LexItem::SpecialChar(self.next_char().unwrap()),
-                '"' => LexItem::Operand(Operand::Str(self.read_string())),
-                '0'..='9' | '-' => LexItem::Operand(Operand::Num(self.read_number())),
-                _ if c.is_alphabetic() => {
-                    let ident = self.read_identifier();
+                '"' => LexItem::Symbol(Value::Str(self.read_string())),
+                '0'..='9' | '-' => LexItem::Symbol(Value::Num(self.read_number())),
+                _ => {
+                    let ident = self.read_symbol();
                     match ident.as_str() {
                         // You would add other operators here
-                        "eq" | "lt" | "gt" | "lte" | "gte" => LexItem::Operator(ident),
-                        _ => LexItem::Operand(Operand::Str(ident)),
+                        "eq" | "lt" | "gt" | "lte" | "gte" => LexItem::ComparisonOperator(ident),
+                        "and" | "or" => LexItem::ArrayOp(ident),
+                        _ => LexItem::Symbol(Value::Str(ident)),
                     }
                 }
-                _ => panic!("Unexpected character when parsing!"),
             }
         })
     }
@@ -157,12 +158,21 @@ pub struct Parser {
     position: usize,
 }
 
+const COMP_OPS: [&str; 5] = ["eq", "lt", "gt", "lte", "gte"];
+
 impl Parser {
     pub fn new(tokens: Vec<LexItem>) -> Self {
         Parser {
             tokens,
             position: 0,
         }
+    }
+
+    fn return_error_msg(&self) -> String {
+        format!(
+            "Unexpected token at position {:?} | {:?}",
+            self.position, self.tokens
+        )
     }
 
     fn peek(&self) -> Option<&LexItem> {
@@ -190,6 +200,41 @@ impl Parser {
         }
     }
 
+    fn parse_top_level_expr(&mut self, key: String) -> Result<Bson, String> {
+        match key.as_str() {
+            "and" | "or" => {
+                // TODO: HERE!
+                return Err(self.return_error_msg());
+            }
+            _ => match self.peek().cloned() {
+                // Case TopLevelExpr -> Field=Value
+                Some(LexItem::Symbol(Value::Str(val))) => {
+                    self.advance();
+                    return Ok(bson!({key: val.to_string()}));
+                }
+                // Case TopLevelExpr -> Field=ComparisonOp.Value
+                Some(LexItem::ComparisonOperator(_)) => {
+                    match (self.advance(), self.advance(), self.advance()) {
+                        (
+                            Some(LexItem::ComparisonOperator(op)),
+                            Some(LexItem::SpecialChar('.')),
+                            Some(LexItem::Symbol(value)),
+                        ) => {
+                            let bson_key = Parser::operator_to_bson_key(&op)?;
+                            let bson_value = match value {
+                                Value::Str(s) => Bson::String(s.clone()),
+                                Value::Num(n) => Bson::Double(n),
+                            };
+                            return Ok(bson!({ bson_key: bson_value }));
+                        }
+                        _ => return Err(self.return_error_msg()),
+                    }
+                }
+                _ => return Err(self.return_error_msg()),
+            },
+        }
+    }
+
     fn parse_q_value_list(&mut self) -> Result<Vec<Bson>, String> {
         let mut q_values = Vec::new();
 
@@ -197,7 +242,7 @@ impl Parser {
             match token {
                 LexItem::SpecialChar(')') => break,
                 LexItem::SpecialChar(',') => continue,
-                LexItem::Operand(Operand::Str(fieldname)) => {
+                LexItem::Symbol(Value::Str(fieldname)) => {
                     if let Some(LexItem::SpecialChar('.')) = self.advance() {
                         let bson_key = fieldname;
                         let bson_value = self.parse_q_value()?;
@@ -205,10 +250,7 @@ impl Parser {
                     }
                 }
                 _ => {
-                    return Err(format!(
-                        "Unexpected token at position {:?} | {:?}",
-                        self.position, self.tokens
-                    ));
+                    return Err(self.return_error_msg());
                 }
             }
         }
@@ -218,26 +260,25 @@ impl Parser {
 
     fn parse_q_value(&mut self) -> Result<Bson, String> {
         match self.peek() {
-            Some(LexItem::Operator(_)) => match (self.advance(), self.advance(), self.advance()) {
-                (
-                    Some(LexItem::Operator(op)),
-                    Some(LexItem::SpecialChar('.')),
-                    Some(LexItem::Operand(value)),
-                ) => {
-                    let bson_key = Parser::operator_to_bson_key(&op)?;
-                    let bson_value = match value {
-                        Operand::Str(s) => Bson::String(s.clone()),
-                        Operand::Num(n) => Bson::Double(n),
-                    };
-                    return Ok(bson!({ bson_key: bson_value }));
+            Some(LexItem::ComparisonOperator(_)) => {
+                match (self.advance(), self.advance(), self.advance()) {
+                    (
+                        Some(LexItem::ComparisonOperator(op)),
+                        Some(LexItem::SpecialChar('.')),
+                        Some(LexItem::Symbol(value)),
+                    ) => {
+                        let bson_key = Parser::operator_to_bson_key(&op)?;
+                        let bson_value = match value {
+                            Value::Str(s) => Bson::String(s.clone()),
+                            Value::Num(n) => Bson::Double(n),
+                        };
+                        return Ok(bson!({ bson_key: bson_value }));
+                    }
+                    _ => {
+                        return Err(self.return_error_msg());
+                    }
                 }
-                _ => {
-                    return Err(format!(
-                        "Unexpected token at position {:?} | {:?}",
-                        self.position, self.tokens
-                    ));
-                }
-            },
+            }
             Some(LexItem::SpecialChar('(')) => {
                 self.advance();
                 let bson_elements = self.parse_q_value_list()?;
