@@ -1,12 +1,11 @@
+#![allow(dead_code)]
+
 use actix_web::{HttpResponse, Responder, web};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use utoipa::{
     OpenApi, ToSchema,
-    openapi::{
-        path::{OperationBuilder, PathItemBuilder},
-        security::{ApiKey, ApiKeyValue, SecurityScheme},
-    },
+    openapi::path::{OperationBuilder, PathItemBuilder},
 };
 
 use crate::catalog::Catalog;
