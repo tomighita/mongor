@@ -129,15 +129,23 @@ async fn update_document(
     // Create the update document with $set operator
     let update = doc! { "$set": update_doc };
 
-    // Update the document(s)
+    // Update a single document with upsert
     match data
         .db_client
         .database(&data.config.database_name)
         .collection::<mongodb::bson::Document>(&coll_name)
-        .update_many(filter, update)
+        .update_one(filter, update)
+        .upsert(true)
         .await
     {
-        Ok(result) => HttpResponse::Ok().json(result),
+        Ok(result) => {
+            // Return 201 Created if a new document was inserted, otherwise 200 OK
+            if result.upserted_id.is_some() {
+                HttpResponse::Created().json(result)
+            } else {
+                HttpResponse::Ok().json(result)
+            }
+        }
         Err(e) => {
             println!("Error updating document: {:?}", e);
             HttpResponse::InternalServerError().body(format!("Error updating document: {:?}", e))

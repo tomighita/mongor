@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use actix_web::{HttpResponse, Responder, web};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

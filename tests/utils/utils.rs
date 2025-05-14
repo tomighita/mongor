@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use mongodb::{Client, options::ClientOptions};
 use reqwest::blocking::Client as ReqwestClient;
 use std::fs;
