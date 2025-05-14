@@ -53,6 +53,14 @@ pub fn get_dynamic_openapi(catalog: &Catalog) -> utoipa::openapi::OpenApi {
                 utoipa::openapi::HttpMethod::Get,
                 OperationBuilder::new()
                     .description(Some("Test description"))
+                    .tag(format!(
+                        "MongoDB Collection {}",
+                        if collection.options.validator.is_some() {
+                            "with validator"
+                        } else {
+                            "without validator"
+                        }
+                    ))
                     .response(
                         "200",
                         utoipa::openapi::ResponseBuilder::new()
