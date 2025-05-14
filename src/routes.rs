@@ -35,47 +35,11 @@ async fn query_collection(
 ) -> impl Responder {
     let coll_name = path.into_inner();
 
-<<<<<<< HEAD
-    // Parse query parameters
-    let mut filter = doc! {};
-
-    for (key, v) in query.iter() {
-        match key.as_str() {
-            "match" => {
-                let parts: Vec<&str> = key.splitn(3, ':').collect();
-                if parts.len() == 3 {
-                    let field_name = parts[1];
-                    // Use the value from the URL parameter key instead of the empty value
-                    let field_value = parts[2];
-
-                    // Try to parse the value as a number if possible
-                    if let Ok(num) = field_value.parse::<i32>() {
-                        filter.insert(field_name, num);
-                    } else {
-                        filter.insert(field_name, field_value.to_string());
-                    }
-                }
-            }
-            "or" => {
-                continue;
-            }
-            "limit" => {
-                // Limit is a special case, we don't want to add it to the filter
-                continue;
-            }
-            path => {
-                filter.insert(path, v);
-            } // _ => {
-              //     // Fail if the query parameter is not a match
-              //     return HttpResponse::BadRequest().body("Invalid query parameter");
-              // }
-=======
     // Parse query parameters using the parser module
     let filter = match crate::parser::parse_query_params(&query) {
         Ok(filter) => filter,
         Err(e) => {
             return HttpResponse::BadRequest().body(format!("Invalid query parameter: {}", e));
->>>>>>> origin/main
         }
     };
 
