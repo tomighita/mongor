@@ -1,14 +1,15 @@
-use actix_web::{App, HttpServer, rt::System, web};
+use actix_web::{App, HttpServer, web};
 use mongodb::{Client, options::ClientOptions};
 use std::env;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use utoipa::{OpenApi, openapi};
+use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 mod catalog;
 mod config;
 mod openapi_docs;
+mod parser;
 mod routes;
 
 pub mod shared {

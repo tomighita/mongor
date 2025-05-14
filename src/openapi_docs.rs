@@ -3,10 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use utoipa::{
     OpenApi, ToSchema,
-    openapi::{
-        path::{OperationBuilder, PathItemBuilder},
-        security::{ApiKey, ApiKeyValue, SecurityScheme},
-    },
+    openapi::path::{OperationBuilder, PathItemBuilder},
 };
 
 use crate::catalog::Catalog;

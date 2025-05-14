@@ -78,7 +78,7 @@ fn test_get_with_matching_document() {
     // Run the test
     run_get_endpoint_test(
         "matching document",
-        "?match:_id:1",
+        "?_id=1",
         vec![test_doc.clone()],
         vec![test_doc],
     );
@@ -96,7 +96,7 @@ fn test_get_with_non_existent_document() {
     // Run the test
     run_get_endpoint_test(
         "non-existent document",
-        "?match:_id:999",
+        "?_id=999",
         vec![test_doc],
         Vec::new(), // Expect empty array
     );
@@ -127,7 +127,7 @@ fn test_get_with_multiple_documents() {
     // Run the test for category A
     run_get_endpoint_test(
         "multiple documents",
-        "?match:category:A",
+        "?category=A",
         docs.clone(),
         vec![docs[0].clone(), docs[1].clone()], // Expect first two documents
     );
