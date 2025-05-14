@@ -6,10 +6,10 @@ use std::process::Child;
 use std::thread;
 use std::time::Duration;
 
-use crate::utils::shared_test_environment::{TestConfig, TOKIO_RUNTIME};
+use crate::utils::test_environment::{TOKIO_RUNTIME, TestConfig};
 
-// Initialize MongoDB and return the process and client
-pub fn initialize_mongodb(config: &TestConfig) -> (Child, Client) {
+// Start MongoDB and return the process
+pub fn start_mongodb(config: &TestConfig) -> Child {
     // Create data directory if it doesn't exist
     if !Path::new(&config.mongodb_data_dir).exists() {
         fs::create_dir_all(&config.mongodb_data_dir)
@@ -17,23 +17,27 @@ pub fn initialize_mongodb(config: &TestConfig) -> (Child, Client) {
     }
 
     // Start MongoDB
-    println!("Starting shared MongoDB instance...");
+    println!("Starting MongoDB instance...");
     let mongodb_process = std::process::Command::new("mongod")
         .args([
-            "--port", &config.mongodb_port.to_string(),
-            "--dbpath", &config.mongodb_data_dir,
-            "--logpath", &config.mongodb_log_path,
+            "--port",
+            &config.mongodb_port.to_string(),
+            "--dbpath",
+            &config.mongodb_data_dir,
+            "--logpath",
+            &config.mongodb_log_path,
             "--fork", // Run in background
-            "--bind_ip", "127.0.0.1",
+            "--bind_ip",
+            "127.0.0.1",
         ])
         .spawn()
         .expect("Failed to start MongoDB");
 
     // Wait for MongoDB to start
     wait_for_tcp_port(config.mongodb_port);
-    println!("Shared MongoDB instance started successfully");
+    println!("MongoDB instance started successfully");
 
-    // Initialize MongoDB client
+    // Initialize a temporary MongoDB client to drop the database
     let mongodb_uri = format!("mongodb://localhost:{}", config.mongodb_port);
     let mongodb_client = TOKIO_RUNTIME.block_on(async {
         let client_options = ClientOptions::parse(&mongodb_uri)
@@ -45,7 +49,10 @@ pub fn initialize_mongodb(config: &TestConfig) -> (Child, Client) {
 
     // Run database setup (drop the database to start with a clean state)
     TOKIO_RUNTIME.block_on(async {
-        println!("Dropping database {} for initial setup", config.database_name);
+        println!(
+            "Dropping database {} for initial setup",
+            config.database_name
+        );
         mongodb_client
             .database(&config.database_name)
             .drop()
@@ -55,12 +62,12 @@ pub fn initialize_mongodb(config: &TestConfig) -> (Child, Client) {
     });
     println!("Database setup complete - dropped database before tests");
 
-    (mongodb_process, mongodb_client)
+    mongodb_process
 }
 
 // Clean up MongoDB resources
 pub fn cleanup_mongodb(process: &mut Child, config: &TestConfig) {
-    println!("Stopping shared MongoDB instance...");
+    println!("Stopping MongoDB instance...");
     process.kill().expect("Failed to stop MongoDB");
 
     // Wait for files to be released
