@@ -1,0 +1,13 @@
+TopLevelExpr -> Field=Value
+TopLevelExpr -> Field=ComparisonOp.Value
+TopLevelExpr -> ArrayOp=(InnerFilters)
+
+InnerFilters -> InnerFilter
+InnerFilters -> InnerFilter, InnerFilters
+
+InnerFilter -> Field.ComparisonOp.Value
+InnerFilter -> Field.Value
+InnerFilter -> ArrayOp=(InnerFilters)
+
+ArrayOp -> and
+ArrayOp -> or
