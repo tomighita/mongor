@@ -9,7 +9,7 @@ use utoipa_swagger_ui::SwaggerUi;
 mod catalog;
 mod config;
 mod openapi_docs;
-mod parser;
+mod query_param_parser;
 mod routes;
 
 pub mod shared {
