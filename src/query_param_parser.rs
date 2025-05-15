@@ -1,4 +1,5 @@
-use mongodb::bson::{Bson, bson};
+use mongodb::bson::{Bson, Document, bson, doc};
+use std::collections::HashMap;
 
 type Number = f64;
 
@@ -128,7 +129,7 @@ impl Lexer {
     fn next_token(&mut self) -> Option<LexItem> {
         self.peek().map(|c| {
             match c {
-                '(' | ')' | ',' | '.' => LexItem::SpecialChar(self.next_char().unwrap()),
+                '(' | ')' | ',' | '.' | '=' => LexItem::SpecialChar(self.next_char().unwrap()),
                 '"' => LexItem::Symbol(Value::Str(self.read_string())),
                 '0'..='9' | '-' => LexItem::Symbol(Value::Num(self.read_number())),
                 _ => {
@@ -157,8 +158,6 @@ pub struct Parser {
     tokens: Vec<LexItem>,
     position: usize,
 }
-
-const COMP_OPS: [&str; 5] = ["eq", "lt", "gt", "lte", "gte"];
 
 impl Parser {
     pub fn new(tokens: Vec<LexItem>) -> Self {
@@ -189,14 +188,22 @@ impl Parser {
         token
     }
 
-    fn operator_to_bson_key(operator: &String) -> Result<String, String> {
-        match operator.as_str() {
+    fn comparison_op_to_bson_key(operator: &str) -> Result<String, String> {
+        match operator {
             "eq" => Ok("$eq".to_string()),
             "lt" => Ok("$lt".to_string()),
             "gt" => Ok("$gt".to_string()),
             "lte" => Ok("$lte".to_string()),
             "gte" => Ok("$gte".to_string()),
             _ => Err(format!("Unknown operator: {}", operator)),
+        }
+    }
+
+    fn logical_op_to_bson_key(operator: &str) -> Result<String, String> {
+        match operator {
+            "and" => Ok("$and".to_string()),
+            "or" => Ok("$or".to_string()),
+            _ => Err(format!("Unknown logical operator: {}", operator)),
         }
     }
 
@@ -208,14 +215,14 @@ impl Parser {
                 match self.advance() {
                     // Case Field.ComparisonOp.Value
                     Some(LexItem::ComparisonOperator(operator)) => {
-                        let bson_key = Parser::operator_to_bson_key(&operator)?;
+                        let bson_key = Parser::comparison_op_to_bson_key(operator.as_str())?;
                         match (self.advance(), self.advance()) {
                             (Some(LexItem::SpecialChar('.')), Some(LexItem::Symbol(value))) => {
                                 let bson_value = match value {
                                     Value::Str(s) => Bson::String(s),
                                     Value::Num(n) => Bson::Double(n),
                                 };
-                                Ok(bson!({ bson_key: { field_name: bson_value }}))
+                                Ok(bson!({ field_name: { bson_key: bson_value }}))
                             }
                             _ => Err(self.return_error_msg()),
                         }
@@ -226,14 +233,16 @@ impl Parser {
                             Value::Num(n) => Bson::Double(n),
                             Value::Str(s) => Bson::String(s),
                         };
-                        return Ok(bson!({ field_name: bson_value}));
+                        Ok(bson!({ field_name: bson_value}))
                     }
-                    _ => return Err(self.return_error_msg()),
+                    _ => Err(self.return_error_msg()),
                 }
             }
-            _ => {
-                return Err(self.return_error_msg());
+            (Some(LexItem::ArrayOp(field_name)), Some(LexItem::SpecialChar('='))) => {
+                let bson_key = Parser::logical_op_to_bson_key(field_name.as_str())?;
+                Ok(bson!({bson_key: self.parse_inner_filters()?}))
             }
+            _ => Err(self.return_error_msg()),
         }
     }
 
@@ -268,14 +277,20 @@ impl Parser {
     fn parse_top_level_expr(&mut self, key: &str) -> Result<Bson, String> {
         match key {
             // Case TopLevelExpr -> (InnerFilters)
-            "and" | "or" => self
-                .parse_inner_filters()
-                .map(|inner_bson| bson!({key: inner_bson})),
+            "and" | "or" => {
+                let bson_key = Parser::logical_op_to_bson_key(key)?;
+                self.parse_inner_filters()
+                    .map(|inner_bson| bson!({bson_key: inner_bson}))
+            }
             _ => match self.peek().cloned() {
                 // Case TopLevelExpr -> Field=Value
-                Some(LexItem::Symbol(Value::Str(val))) => {
+                Some(LexItem::Symbol(val)) => {
                     self.advance();
-                    return Ok(bson!({key: val.to_string()}));
+                    let bson_value = match val {
+                        Value::Str(s) => Bson::String(s.clone()),
+                        Value::Num(n) => Bson::Double(n),
+                    };
+                    return Ok(bson!({key: bson_value}));
                 }
                 // Case TopLevelExpr -> Field=ComparisonOp.Value
                 Some(LexItem::ComparisonOperator(_)) => {
@@ -285,12 +300,12 @@ impl Parser {
                             Some(LexItem::SpecialChar('.')),
                             Some(LexItem::Symbol(value)),
                         ) => {
-                            let bson_key = Parser::operator_to_bson_key(&op)?;
+                            let mql_comparison_op = Parser::comparison_op_to_bson_key(op.as_str())?;
                             let bson_value = match value {
                                 Value::Str(s) => Bson::String(s.clone()),
                                 Value::Num(n) => Bson::Double(n),
                             };
-                            Ok(bson!({ bson_key: {key: bson_value} }))
+                            Ok(bson!({ key: {mql_comparison_op: bson_value} }))
                         }
                         _ => Err(self.return_error_msg()),
                     }
@@ -300,67 +315,130 @@ impl Parser {
         }
     }
 
-    fn parse_q_value_list(&mut self) -> Result<Vec<Bson>, String> {
-        let mut q_values = Vec::new();
-
-        while let Some(token) = self.advance() {
-            match token {
-                LexItem::SpecialChar(')') => break,
-                LexItem::SpecialChar(',') => continue,
-                LexItem::Symbol(Value::Str(fieldname)) => {
-                    if let Some(LexItem::SpecialChar('.')) = self.advance() {
-                        let bson_key = fieldname;
-                        let bson_value = self.parse_q_value()?;
-                        q_values.push(bson!({ bson_key: bson_value }));
-                    }
-                }
-                _ => {
-                    return Err(self.return_error_msg());
-                }
-            }
-        }
-
-        Ok(q_values)
-    }
-
-    fn parse_q_value(&mut self) -> Result<Bson, String> {
-        match self.peek() {
-            Some(LexItem::ComparisonOperator(_)) => {
-                match (self.advance(), self.advance(), self.advance()) {
-                    (
-                        Some(LexItem::ComparisonOperator(op)),
-                        Some(LexItem::SpecialChar('.')),
-                        Some(LexItem::Symbol(value)),
-                    ) => {
-                        let bson_key = Parser::operator_to_bson_key(&op)?;
-                        let bson_value = match value {
-                            Value::Str(s) => Bson::String(s.clone()),
-                            Value::Num(n) => Bson::Double(n),
-                        };
-                        return Ok(bson!({ bson_key: bson_value }));
-                    }
-                    _ => {
-                        return Err(self.return_error_msg());
-                    }
-                }
-            }
-            Some(LexItem::SpecialChar('(')) => {
-                self.advance();
-                let bson_elements = self.parse_q_value_list()?;
-                Ok(bson!(bson_elements))
-            }
-            _ => Err(format!(
-                "Unexpected token at position {:?} | {:?}",
-                self.position, self.tokens
-            )),
-        }
-    }
-
     pub fn parse(&mut self, key: &str) -> Result<Bson, String> {
         let result = self.parse_top_level_expr(key)?;
         match self.peek() {
             Some(_) => Err(self.return_error_msg()),
             None => Ok(result),
         }
+    }
+}
+
+pub fn parse(key: &str, value: &str) -> Result<Bson, String> {
+    let mut lexer = Lexer::new(value);
+    let tokens = lexer.tokenize();
+    let mut parser = Parser::new(tokens);
+    parser.parse(key)
+}
+
+/// Parses query parameters from a URL query string into a MongoDB filter document.
+///
+/// This function supports two modes of operation:
+/// 1. Simple mode: query parameters in the format "field_name=value"
+///    It will attempt to parse numeric values as numbers, otherwise they will be treated as strings.
+/// 2. Advanced mode: query parameters with comparison operators and logical operators
+///    For example: "field.eq.value" or "or=(field1.eq.value1,field2.gt.10)"
+///
+/// # Arguments
+///
+/// * `query_params` - A HashMap containing the query parameters from the URL
+///
+/// # Returns
+///
+/// * `Result<Document, String>` - A MongoDB filter document or an error message
+#[allow(dead_code)]
+pub fn parse_query_params(query_params: &HashMap<String, String>) -> Result<Document, String> {
+    let mut filter = doc! {};
+
+    for (field_name, field_value) in query_params.iter() {
+        match parse(field_name, field_value) {
+            Ok(Bson::Document(doc)) => filter.extend(doc),
+            Ok(val) => return Err(format!("Unexpected bson: {}", val)),
+            Err(err) => return Err(err),
+        }
+    }
+
+    Ok(filter)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mongodb::bson::doc;
+
+    #[test]
+    fn test_parse_query_params_empty() {
+        let query_params = HashMap::new();
+        let result = parse_query_params(&query_params);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), doc! {});
+    }
+
+    #[test]
+    fn test_parse_query_params_string_value() {
+        let mut query_params = HashMap::new();
+        query_params.insert("name".to_string(), "john".to_string());
+
+        let result = parse_query_params(&query_params);
+        assert!(result.is_ok());
+
+        let filter = result.unwrap();
+        assert_eq!(filter.get_str("name").unwrap(), "john");
+    }
+
+    #[test]
+    fn test_parse_query_params_numeric_value() {
+        let mut query_params = HashMap::new();
+        query_params.insert("age".to_string(), "30".to_string());
+
+        let result = parse_query_params(&query_params);
+        assert!(result.is_ok());
+
+        let filter = result.unwrap();
+        assert_eq!(filter, doc! {"age": 30.0});
+    }
+
+    #[test]
+    fn test_parse_query_params_multiple_fields() {
+        let mut query_params = HashMap::new();
+        query_params.insert("name".to_string(), "john".to_string());
+        query_params.insert("age".to_string(), "30".to_string());
+
+        let result = parse_query_params(&query_params);
+        assert!(
+            result.is_ok(),
+            "Failed to parse query params: {:?}",
+            result.err()
+        );
+
+        let filter = result.unwrap();
+        assert_eq!(filter, doc! {"name": "john", "age": 30.0});
+    }
+
+    #[test]
+    fn test_parse_query_params_advanced_comparison() {
+        let mut query_params = HashMap::new();
+        query_params.insert("age".to_string(), "gt.25".to_string());
+
+        let result = parse_query_params(&query_params);
+        assert!(result.is_ok());
+
+        let filter = result.unwrap();
+        assert!(filter.contains_key("age"));
+        let age_doc = filter.get_document("age").unwrap();
+        assert!(age_doc.contains_key("$gt"));
+        assert_eq!(age_doc.get_f64("$gt").unwrap(), 25.0);
+    }
+
+    #[test]
+    fn test_parse_query_params_advanced_logical() {
+        let mut query_params = HashMap::new();
+        query_params.insert("or".to_string(), "(age.gt.25,name.eq.john)".to_string());
+
+        let result = parse_query_params(&query_params);
+        assert!(result.is_ok());
+
+        let filter = result.unwrap();
+        assert!(filter.contains_key("or") || filter.contains_key("$or"));
     }
 }
