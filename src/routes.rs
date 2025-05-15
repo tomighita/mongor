@@ -4,7 +4,7 @@ use mongodb::bson::doc;
 use serde_json::Value;
 
 use crate::shared::AppState;
-use mongor::query_param_parser;
+use mongor::parse_query_params;
 
 #[get("/")]
 async fn hello() -> impl Responder {
@@ -36,8 +36,8 @@ async fn query_collection(
 ) -> impl Responder {
     let coll_name = path.into_inner();
 
-    // Parse query parameters using the query_param_parser module
-    let filter = match query_param_parser::parse_query_params(&query) {
+    // Parse query parameters
+    let filter = match parse_query_params(&query) {
         Ok(filter) => filter,
         Err(e) => {
             return HttpResponse::BadRequest().body(format!("Invalid query parameter: {}", e));
@@ -112,7 +112,7 @@ async fn update_document(
     let coll_name = path.into_inner();
 
     // Parse query parameters for filter
-    let filter = match query_param_parser::parse_query_params(&query) {
+    let filter = match parse_query_params(&query) {
         Ok(filter) => filter,
         Err(e) => {
             return HttpResponse::BadRequest().body(format!("Invalid query parameter: {}", e));
@@ -166,7 +166,7 @@ async fn patch_document(
     let coll_name = path.into_inner();
 
     // Parse query parameters for filter
-    let filter = match query_param_parser::parse_query_params(&query) {
+    let filter = match parse_query_params(&query) {
         Ok(filter) => filter,
         Err(e) => {
             return HttpResponse::BadRequest().body(format!("Invalid query parameter: {}", e));
@@ -209,7 +209,7 @@ async fn delete_document(
     let coll_name = path.into_inner();
 
     // Parse query parameters for filter
-    let filter = match query_param_parser::parse_query_params(&query) {
+    let filter = match parse_query_params(&query) {
         Ok(filter) => filter,
         Err(e) => {
             return HttpResponse::BadRequest().body(format!("Invalid query parameter: {}", e));

@@ -323,6 +323,7 @@ impl Parser {
 /// # Returns
 ///
 /// * `Result<Document, String>` - A MongoDB filter document or an error message
+#[allow(dead_code)]
 pub fn parse_query_params(query_params: &HashMap<String, String>) -> Result<Document, String> {
     let mut filter = doc! {};
 
