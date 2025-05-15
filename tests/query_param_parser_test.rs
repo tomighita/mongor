@@ -113,14 +113,14 @@ mod tests {
             (
                 "eq.2.05",
                 bson!({
-                    "$eq": {input_key: 2.05}
+                    input_key: {"$eq": 2.05}
                 }),
             ),
             (
                 "lt.test",
                 bson!({
-                    "$lt": {
-                        input_key: "test"
+                    input_key: {
+                        "$lt": "test"
                     }
                 }),
             ),
@@ -134,38 +134,65 @@ mod tests {
 
     #[test]
     fn test_arr_top_level_expr() {
-        let input_key = "or".as_ref();
-
-        let test_cases = [(
-            "(field1.eq.\"test\",field2.lt.24.5,field3.gte.-2,field4.eq.hello)",
-            bson!({input_key: [
-                {
-                    "$eq": {
-                        "field1": "test"
+        let test_cases = [
+            (
+                "(field1.eq.\"test\",field2.lt.24.5,field3.gte.-2,field4.eq.hello)",
+                bson!({"$or": [
+                    {
+                        "field1": {
+                            "$eq": "test"
+                        }
+                    },
+                    {
+                        "field2": {
+                            "$lt": 24.5
+                        }
+                    },
+                    {
+                        "field3": {
+                            "$gte": -2.0
+                        }
+                    },
+                    {
+                        "field4": {
+                            "$eq": "hello"
+                        }
                     }
-                },
-                {
-                    "$lt": {
-                        "field2": 24.5
-                    }
-                },
-                {
-                    "$gte": {
-                        "field3": -2.0
-                    }
-                },
-                {
-                    "$eq": {
-                        "field4": "hello"
-                    }
-                }
-            ]}),
-        )];
+                ]}),
+            ),
+            (
+                "(field1.eq.\"test\",or=(field2.lt.24,field3.gte.-2,field4.eq.hello))",
+                bson!({"$or": [
+                    {
+                        "field1": {
+                            "$eq": "test"
+                        }
+                    },
+                    {"$or": [
+                        {
+                            "field2": {
+                                "$lt": 24.0
+                            }
+                        },
+                        {
+                            "field3": {
+                                "$gte": -2.0
+                            }
+                        },
+                        {
+                            "field4": {
+                                "$eq": "hello"
+                            }
+                        }
+                    ]}
+                ]}),
+            ),
+        ];
 
         for (input, expected) in test_cases {
             let mut lexer = Lexer::new(input);
             let mut parser = Parser::new(lexer.tokenize());
-            assert_eq!(parser.parse(input_key).unwrap(), bson!(expected));
+            assert_eq!(parser.parse("or").unwrap(), bson!(expected));
         }
     }
 }

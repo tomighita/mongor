@@ -129,7 +129,7 @@ impl Lexer {
     fn next_token(&mut self) -> Option<LexItem> {
         self.peek().map(|c| {
             match c {
-                '(' | ')' | ',' | '.' => LexItem::SpecialChar(self.next_char().unwrap()),
+                '(' | ')' | ',' | '.' | '=' => LexItem::SpecialChar(self.next_char().unwrap()),
                 '"' => LexItem::Symbol(Value::Str(self.read_string())),
                 '0'..='9' | '-' => LexItem::Symbol(Value::Num(self.read_number())),
                 _ => {
@@ -188,14 +188,22 @@ impl Parser {
         token
     }
 
-    fn operator_to_bson_key(operator: &String) -> Result<String, String> {
-        match operator.as_str() {
+    fn comparison_op_to_bson_key(operator: &str) -> Result<String, String> {
+        match operator {
             "eq" => Ok("$eq".to_string()),
             "lt" => Ok("$lt".to_string()),
             "gt" => Ok("$gt".to_string()),
             "lte" => Ok("$lte".to_string()),
             "gte" => Ok("$gte".to_string()),
             _ => Err(format!("Unknown operator: {}", operator)),
+        }
+    }
+
+    fn logical_op_to_bson_key(operator: &str) -> Result<String, String> {
+        match operator {
+            "and" => Ok("$and".to_string()),
+            "or" => Ok("$or".to_string()),
+            _ => Err(format!("Unknown logical operator: {}", operator)),
         }
     }
 
@@ -207,14 +215,14 @@ impl Parser {
                 match self.advance() {
                     // Case Field.ComparisonOp.Value
                     Some(LexItem::ComparisonOperator(operator)) => {
-                        let bson_key = Parser::operator_to_bson_key(&operator)?;
+                        let bson_key = Parser::comparison_op_to_bson_key(operator.as_str())?;
                         match (self.advance(), self.advance()) {
                             (Some(LexItem::SpecialChar('.')), Some(LexItem::Symbol(value))) => {
                                 let bson_value = match value {
                                     Value::Str(s) => Bson::String(s),
                                     Value::Num(n) => Bson::Double(n),
                                 };
-                                Ok(bson!({ bson_key: { field_name: bson_value }}))
+                                Ok(bson!({ field_name: { bson_key: bson_value }}))
                             }
                             _ => Err(self.return_error_msg()),
                         }
@@ -225,14 +233,16 @@ impl Parser {
                             Value::Num(n) => Bson::Double(n),
                             Value::Str(s) => Bson::String(s),
                         };
-                        return Ok(bson!({ field_name: bson_value}));
+                        Ok(bson!({ field_name: bson_value}))
                     }
-                    _ => return Err(self.return_error_msg()),
+                    _ => Err(self.return_error_msg()),
                 }
             }
-            _ => {
-                return Err(self.return_error_msg());
+            (Some(LexItem::ArrayOp(field_name)), Some(LexItem::SpecialChar('='))) => {
+                let bson_key = Parser::logical_op_to_bson_key(field_name.as_str())?;
+                Ok(bson!({bson_key: self.parse_inner_filters()?}))
             }
+            _ => Err(self.return_error_msg()),
         }
     }
 
@@ -267,14 +277,20 @@ impl Parser {
     fn parse_top_level_expr(&mut self, key: &str) -> Result<Bson, String> {
         match key {
             // Case TopLevelExpr -> (InnerFilters)
-            "and" | "or" => self
-                .parse_inner_filters()
-                .map(|inner_bson| bson!({key: inner_bson})),
+            "and" | "or" => {
+                let bson_key = Parser::logical_op_to_bson_key(key)?;
+                self.parse_inner_filters()
+                    .map(|inner_bson| bson!({bson_key: inner_bson}))
+            }
             _ => match self.peek().cloned() {
                 // Case TopLevelExpr -> Field=Value
-                Some(LexItem::Symbol(Value::Str(val))) => {
+                Some(LexItem::Symbol(val)) => {
                     self.advance();
-                    return Ok(bson!({key: val.to_string()}));
+                    let bson_value = match val {
+                        Value::Str(s) => Bson::String(s.clone()),
+                        Value::Num(n) => Bson::Double(n),
+                    };
+                    return Ok(bson!({key: bson_value}));
                 }
                 // Case TopLevelExpr -> Field=ComparisonOp.Value
                 Some(LexItem::ComparisonOperator(_)) => {
@@ -284,12 +300,12 @@ impl Parser {
                             Some(LexItem::SpecialChar('.')),
                             Some(LexItem::Symbol(value)),
                         ) => {
-                            let bson_key = Parser::operator_to_bson_key(&op)?;
+                            let mql_comparison_op = Parser::comparison_op_to_bson_key(op.as_str())?;
                             let bson_value = match value {
                                 Value::Str(s) => Bson::String(s.clone()),
                                 Value::Num(n) => Bson::Double(n),
                             };
-                            Ok(bson!({ bson_key: {key: bson_value} }))
+                            Ok(bson!({ key: {mql_comparison_op: bson_value} }))
                         }
                         _ => Err(self.return_error_msg()),
                     }
@@ -306,6 +322,13 @@ impl Parser {
             None => Ok(result),
         }
     }
+}
+
+pub fn parse(key: &str, value: &str) -> Result<Bson, String> {
+    let mut lexer = Lexer::new(value);
+    let tokens = lexer.tokenize();
+    let mut parser = Parser::new(tokens);
+    parser.parse(key)
 }
 
 /// Parses query parameters from a URL query string into a MongoDB filter document.
@@ -328,85 +351,10 @@ pub fn parse_query_params(query_params: &HashMap<String, String>) -> Result<Docu
     let mut filter = doc! {};
 
     for (field_name, field_value) in query_params.iter() {
-        // Check if this is an advanced query expression
-        if field_value.contains('.') || field_name == "and" || field_name == "or" {
-            // For now, handle only simple comparison operators
-            if field_value.contains('.') && !field_name.starts_with("$") {
-                let parts: Vec<&str> = field_value.split('.').collect();
-                if parts.len() == 2 && parts[0] == "gt" {
-                    // Handle age=gt.30 format
-                    if let Ok(num) = parts[1].parse::<f64>() {
-                        filter.insert(field_name, doc! { "$gt": num });
-                        continue;
-                    }
-                } else if parts.len() == 2 && parts[0] == "lt" {
-                    // Handle age=lt.30 format
-                    if let Ok(num) = parts[1].parse::<f64>() {
-                        filter.insert(field_name, doc! { "$lt": num });
-                        continue;
-                    }
-                } else if parts.len() == 2 && parts[0] == "eq" {
-                    // Handle name=eq.john format
-                    filter.insert(field_name, parts[1]);
-                    continue;
-                }
-            } else if field_name == "or"
-                && field_value.starts_with("(")
-                && field_value.ends_with(")")
-            {
-                // Handle or=(field1.op.value,field2.op.value) format
-                let inner = &field_value[1..field_value.len() - 1];
-                let conditions: Vec<&str> = inner.split(',').collect();
-
-                let mut or_conditions = Vec::new();
-                for condition in conditions {
-                    let parts: Vec<&str> = condition.split('.').collect();
-                    if parts.len() == 3 {
-                        let field = parts[0];
-                        let op = parts[1];
-                        let value = parts[2];
-
-                        if op == "gt" {
-                            if let Ok(num) = value.parse::<f64>() {
-                                or_conditions.push(doc! { field: { "$gt": num } });
-                            }
-                        } else if op == "eq" {
-                            or_conditions.push(doc! { field: value });
-                        }
-                    }
-                }
-
-                if !or_conditions.is_empty() {
-                    filter.insert("$or", or_conditions);
-                    continue;
-                }
-            }
-
-            // If we couldn't handle the advanced expression, fall back to simple mode
-            // Try to parse the value as a number if possible
-            if let Ok(num) = field_value.parse::<f64>() {
-                // Check if it's an integer
-                if num.fract() == 0.0 && num >= i32::MIN as f64 && num <= i32::MAX as f64 {
-                    filter.insert(field_name, num as i32);
-                } else {
-                    filter.insert(field_name, num);
-                }
-            } else {
-                filter.insert(field_name, field_value.to_string());
-            }
-        } else {
-            // Use simple parsing for basic field=value pairs
-            // Try to parse the value as a number if possible
-            if let Ok(num) = field_value.parse::<f64>() {
-                // Check if it's an integer
-                if num.fract() == 0.0 && num >= i32::MIN as f64 && num <= i32::MAX as f64 {
-                    filter.insert(field_name, num as i32);
-                } else {
-                    filter.insert(field_name, num);
-                }
-            } else {
-                filter.insert(field_name, field_value.to_string());
-            }
+        match parse(field_name, field_value) {
+            Ok(Bson::Document(doc)) => filter.extend(doc),
+            Ok(val) => return Err(format!("Unexpected bson: {}", val)),
+            Err(err) => return Err(err),
         }
     }
 
@@ -447,7 +395,7 @@ mod tests {
         assert!(result.is_ok());
 
         let filter = result.unwrap();
-        assert_eq!(filter.get_i32("age").unwrap(), 30);
+        assert_eq!(filter, doc! {"age": 30.0});
     }
 
     #[test]
@@ -457,11 +405,14 @@ mod tests {
         query_params.insert("age".to_string(), "30".to_string());
 
         let result = parse_query_params(&query_params);
-        assert!(result.is_ok());
+        assert!(
+            result.is_ok(),
+            "Failed to parse query params: {:?}",
+            result.err()
+        );
 
         let filter = result.unwrap();
-        assert_eq!(filter.get_str("name").unwrap(), "john");
-        assert_eq!(filter.get_i32("age").unwrap(), 30);
+        assert_eq!(filter, doc! {"name": "john", "age": 30.0});
     }
 
     #[test]
