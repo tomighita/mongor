@@ -200,12 +200,77 @@ impl Parser {
         }
     }
 
-    fn parse_top_level_expr(&mut self, key: String) -> Result<Bson, String> {
-        match key.as_str() {
-            "and" | "or" => {
-                // TODO: HERE!
+    fn parse_inner_filter(&mut self) -> Result<Bson, String> {
+        let first_token = self.advance();
+        let second_token = self.advance();
+        match (first_token, second_token) {
+            (Some(LexItem::Symbol(Value::Str(field_name))), Some(LexItem::SpecialChar('.'))) => {
+                match self.advance() {
+                    // Case Field.ComparisonOp.Value
+                    Some(LexItem::ComparisonOperator(operator)) => {
+                        let bson_key = Parser::operator_to_bson_key(&operator)?;
+                        match (self.advance(), self.advance()) {
+                            (Some(LexItem::SpecialChar('.')), Some(LexItem::Symbol(value))) => {
+                                let bson_value = match value {
+                                    Value::Str(s) => Bson::String(s),
+                                    Value::Num(n) => Bson::Double(n),
+                                };
+                                Ok(bson!({ bson_key: { field_name: bson_value }}))
+                            }
+                            _ => Err(self.return_error_msg()),
+                        }
+                    }
+                    // Case Field.Value
+                    Some(LexItem::Symbol(val)) => {
+                        let bson_value = match val {
+                            Value::Num(n) => Bson::Double(n),
+                            Value::Str(s) => Bson::String(s),
+                        };
+                        return Ok(bson!({ field_name: bson_value}));
+                    }
+                    _ => return Err(self.return_error_msg()),
+                }
+            }
+            _ => {
                 return Err(self.return_error_msg());
             }
+        }
+    }
+
+    fn parse_inner_filters(&mut self) -> Result<Bson, String> {
+        if let Some(LexItem::SpecialChar('(')) = self.peek() {
+            self.advance();
+            let mut filters = Vec::new();
+            while let Some(token) = self.peek() {
+                match token {
+                    LexItem::SpecialChar(')') => {
+                        self.advance();
+                        break;
+                    }
+                    LexItem::SpecialChar(',') => {
+                        self.advance();
+                        continue;
+                    }
+                    _ => {
+                        if let Ok(obj) = self.parse_inner_filter() {
+                            filters.push(obj);
+                        } else {
+                            return Err(self.return_error_msg());
+                        }
+                    }
+                }
+            }
+            return Ok(bson!(filters));
+        }
+        return Err(self.return_error_msg());
+    }
+
+    fn parse_top_level_expr(&mut self, key: &str) -> Result<Bson, String> {
+        match key {
+            // Case TopLevelExpr -> (InnerFilters)
+            "and" | "or" => self
+                .parse_inner_filters()
+                .map(|inner_bson| bson!({key: inner_bson})),
             _ => match self.peek().cloned() {
                 // Case TopLevelExpr -> Field=Value
                 Some(LexItem::Symbol(Value::Str(val))) => {
@@ -225,12 +290,12 @@ impl Parser {
                                 Value::Str(s) => Bson::String(s.clone()),
                                 Value::Num(n) => Bson::Double(n),
                             };
-                            return Ok(bson!({ bson_key: bson_value }));
+                            Ok(bson!({ bson_key: {key: bson_value} }))
                         }
-                        _ => return Err(self.return_error_msg()),
+                        _ => Err(self.return_error_msg()),
                     }
                 }
-                _ => return Err(self.return_error_msg()),
+                _ => Err(self.return_error_msg()),
             },
         }
     }
@@ -291,14 +356,11 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Bson, String> {
-        let result = self.parse_q_value()?;
-        if self.peek() != None {
-            return Err(format!(
-                "Unexpected token at position {:?} | {:?}",
-                self.position, self.tokens
-            ));
+    pub fn parse(&mut self, key: &str) -> Result<Bson, String> {
+        let result = self.parse_top_level_expr(key)?;
+        match self.peek() {
+            Some(_) => Err(self.return_error_msg()),
+            None => Ok(result),
         }
-        Ok(result)
     }
 }

@@ -105,55 +105,67 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn test_values_values() {
-    //     let test_cases = [
-    //         (
-    //             "eq.2.05",
-    //             bson!({
-    //                 "$eq": 2.05
-    //             }),
-    //         ),
-    //         (
-    //             "(field1.eq.\"test\",field2.lt.24.5,field3.gte.-2,field4.eq.hello)",
-    //             bson!([
-    //                 {
-    //                     "field1": {
-    //                         "$eq": "test"
-    //                     }
-    //                 },
-    //                 {
-    //                     "field2": {
-    //                         "$lt": 24.5
-    //                     }
-    //                 },
-    //                 {
-    //                     "field3": {
-    //                         "$gte": -2.0
-    //                     }
-    //                 },
-    //                 {
-    //                     "field4": {
-    //                         "$eq": "hello"
-    //                     }
-    //                 }
-    //             ]),
-    //         ),
-    //         (
-    //             "(\"a.b.c\".eq.test)",
-    //             bson!([
-    //                 {
-    //                     "a.b.c": {
-    //                         "$eq": "test"
-    //                     }
-    //                 }
-    //             ]),
-    //         ),
-    //     ];
-    //     for (input, expected) in test_cases {
-    //         let mut lexer = Lexer::new(input);
-    //         let mut parser = Parser::new(lexer.tokenize());
-    //         assert_eq!(parser.parse().expect("Not good"), expected);
-    //     }
-    // }
+    #[test]
+    fn test_simple_top_level_expr() {
+        let input_key = "test".as_ref();
+
+        let test_cases = [
+            (
+                "eq.2.05",
+                bson!({
+                    "$eq": {input_key: 2.05}
+                }),
+            ),
+            (
+                "lt.test",
+                bson!({
+                    "$lt": {
+                        input_key: "test"
+                    }
+                }),
+            ),
+        ];
+        for (input, expected) in test_cases {
+            let mut lexer = Lexer::new(input);
+            let mut parser = Parser::new(lexer.tokenize());
+            assert_eq!(parser.parse(input_key).expect("Not good"), bson!(expected));
+        }
+    }
+
+    #[test]
+    fn test_arr_top_level_expr() {
+        let input_key = "or".as_ref();
+
+        let test_cases = [(
+            "(field1.eq.\"test\",field2.lt.24.5,field3.gte.-2,field4.eq.hello)",
+            bson!({input_key: [
+                {
+                    "$eq": {
+                        "field1": "test"
+                    }
+                },
+                {
+                    "$lt": {
+                        "field2": 24.5
+                    }
+                },
+                {
+                    "$gte": {
+                        "field3": -2.0
+                    }
+                },
+                {
+                    "$eq": {
+                        "field4": "hello"
+                    }
+                }
+            ]}),
+        )];
+
+        for (input, expected) in test_cases {
+            let mut lexer = Lexer::new(input);
+            let mut parser = Parser::new(lexer.tokenize());
+            assert_eq!(parser.parse(input_key).unwrap(), bson!(expected));
+        }
+    }
 }
