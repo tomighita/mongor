@@ -409,6 +409,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_query_params_single_or() {
+        let mut query_params = HashMap::new();
+        query_params.insert(
+            "or".to_owned(),
+            "(title.\"The Perils of Pauline\",title.\"It\")".to_owned(),
+        );
+        let result = parse_match_query_params(&query_params);
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            doc! {"$or": [{"title": "The Perils of Pauline"}, {"title": "It"}]}
+        );
+    }
+
+    #[test]
     fn test_parse_query_params_string_value() {
         let mut query_params = HashMap::new();
         query_params.insert("name".to_string(), "john".to_string());
