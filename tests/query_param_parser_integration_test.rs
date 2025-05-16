@@ -19,145 +19,164 @@ fn unique_collection_name(test_name: &str) -> String {
     )
 }
 
-/// Run a query endpoint test with the given parameters
-///
-/// This function:
-/// 1. Creates a test environment (MongoDB + app)
-/// 2. Creates a collection with a unique name and inserts test documents
-/// 3. Makes a request to the endpoint with the given query
-/// 4. Verifies the response matches the expected documents
-/// 5. Automatically cleans up all processes when the test environment is dropped
-fn run_query_parser_test(
-    test_name: &str,
-    request_path: &str,
-    test_documents: Vec<Document>,
-    expected_documents: Vec<Document>,
-) {
-    // Create test environment (starts MongoDB and app)
+#[test]
+#[serial]
+fn test_query_parser_all_cases() {
+    // Create a single test environment for all test cases
     let env = TestEnvironment::new();
 
-    // Generate a unique collection name for this test
-    let collection_name = unique_collection_name(test_name);
+    // Test case 1: Simple field value query
+    {
+        // Test documents
+        let docs = vec![
+            doc! {
+                "_id": 1,
+                "name": "first document",
+                "age": 25
+            },
+            doc! {
+                "_id": 2,
+                "name": "second document",
+                "age": 30
+            },
+            doc! {
+                "_id": 3,
+                "name": "third document",
+                "age": 35
+            },
+        ];
 
-    // Insert test data (the insert_test_data method will drop the collection first)
-    env.insert_test_data(&collection_name, test_documents);
+        // Generate a unique collection name for this test
+        let collection_name = unique_collection_name("simple_field_value");
 
-    // Make a request to our endpoint
-    let full_request_path = format!("/{}{}", collection_name, request_path);
-    let (status_code, body) = make_http_request(&full_request_path);
+        // Insert test data
+        env.insert_test_data(&collection_name, docs.clone());
 
-    // Verify the response
-    assert_eq!(
-        status_code, 200,
-        "Expected status code 200, got {}",
-        status_code
-    );
+        // Make a request to our endpoint
+        let full_request_path = format!("/{}?age=30", collection_name);
+        let (status_code, body) = make_http_request(&full_request_path);
 
-    // Parse the JSON response into BSON documents
-    let documents: Vec<Document> =
-        serde_json::from_str(&body).expect("Failed to parse JSON response");
+        // Verify the response
+        assert_eq!(
+            status_code, 200,
+            "Expected status code 200, got {}",
+            status_code
+        );
 
-    // Verify the response matches expected documents directly
-    assert_eq!(
-        documents, expected_documents,
-        "Documents don't match expected values"
-    );
+        // Parse the JSON response into BSON documents
+        let documents: Vec<Document> =
+            serde_json::from_str(&body).expect("Failed to parse JSON response");
+
+        // Verify the response matches expected documents
+        assert_eq!(
+            documents,
+            vec![docs[1].clone()],
+            "Documents don't match expected values"
+        );
+    }
+
+    // Test case 2: Advanced comparison query
+    {
+        // Test documents
+        let docs = vec![
+            doc! {
+                "_id": 1,
+                "name": "first document",
+                "age": 25
+            },
+            doc! {
+                "_id": 2,
+                "name": "second document",
+                "age": 30
+            },
+            doc! {
+                "_id": 3,
+                "name": "third document",
+                "age": 35
+            },
+        ];
+
+        // Generate a unique collection name for this test
+        let collection_name = unique_collection_name("advanced_comparison");
+
+        // Insert test data
+        env.insert_test_data(&collection_name, docs.clone());
+
+        // Make a request to our endpoint
+        let full_request_path = format!("/{}?age=gt.30", collection_name);
+        let (status_code, body) = make_http_request(&full_request_path);
+
+        // Verify the response
+        assert_eq!(
+            status_code, 200,
+            "Expected status code 200, got {}",
+            status_code
+        );
+
+        // Parse the JSON response into BSON documents
+        let documents: Vec<Document> =
+            serde_json::from_str(&body).expect("Failed to parse JSON response");
+
+        // Verify the response matches expected documents
+        assert_eq!(
+            documents,
+            vec![docs[2].clone()],
+            "Documents don't match expected values"
+        );
+    }
+
+    // Test case 3: Advanced logical query
+    {
+        // Test documents
+        let docs = vec![
+            doc! {
+                "_id": 1,
+                "name": "first document",
+                "age": 25,
+                "category": "A"
+            },
+            doc! {
+                "_id": 2,
+                "name": "second document",
+                "age": 30,
+                "category": "B"
+            },
+            doc! {
+                "_id": 3,
+                "name": "third document",
+                "age": 35,
+                "category": "A"
+            },
+        ];
+
+        // Generate a unique collection name for this test
+        let collection_name = unique_collection_name("advanced_logical");
+
+        // Insert test data
+        env.insert_test_data(&collection_name, docs.clone());
+
+        // Make a request to our endpoint
+        let full_request_path = format!("/{}?age=gt.30", collection_name);
+        let (status_code, body) = make_http_request(&full_request_path);
+
+        // Verify the response
+        assert_eq!(
+            status_code, 200,
+            "Expected status code 200, got {}",
+            status_code
+        );
+
+        // Parse the JSON response into BSON documents
+        let documents: Vec<Document> =
+            serde_json::from_str(&body).expect("Failed to parse JSON response");
+
+        // Verify the response matches expected documents
+        assert_eq!(
+            documents,
+            vec![docs[2].clone()],
+            "Documents don't match expected values"
+        );
+    }
 
     // The test environment will be automatically cleaned up when it goes out of scope
-}
-
-#[test]
-#[serial]
-fn test_simple_field_value_query() {
-    // Test documents
-    let docs = vec![
-        doc! {
-            "_id": 1,
-            "name": "first document",
-            "age": 25
-        },
-        doc! {
-            "_id": 2,
-            "name": "second document",
-            "age": 30
-        },
-        doc! {
-            "_id": 3,
-            "name": "third document",
-            "age": 35
-        },
-    ];
-
-    // Run the test for age=30
-    run_query_parser_test(
-        "simple field value",
-        "?age=30",
-        docs.clone(),
-        vec![docs[1].clone()], // Expect only the second document
-    );
-}
-
-#[test]
-#[serial]
-fn test_advanced_comparison_query() {
-    // Test documents
-    let docs = vec![
-        doc! {
-            "_id": 1,
-            "name": "first document",
-            "age": 25
-        },
-        doc! {
-            "_id": 2,
-            "name": "second document",
-            "age": 30
-        },
-        doc! {
-            "_id": 3,
-            "name": "third document",
-            "age": 35
-        },
-    ];
-
-    // Run the test for age=gt.30
-    run_query_parser_test(
-        "advanced comparison",
-        "?age=gt.30",
-        docs.clone(),
-        vec![docs[2].clone()], // Expect only the third document
-    );
-}
-
-#[test]
-#[serial]
-fn test_advanced_logical_query() {
-    // Test documents
-    let docs = vec![
-        doc! {
-            "_id": 1,
-            "name": "first document",
-            "age": 25,
-            "category": "A"
-        },
-        doc! {
-            "_id": 2,
-            "name": "second document",
-            "age": 30,
-            "category": "B"
-        },
-        doc! {
-            "_id": 3,
-            "name": "third document",
-            "age": 35,
-            "category": "A"
-        },
-    ];
-
-    // Run a simpler test for now
-    run_query_parser_test(
-        "advanced logical",
-        "?age=gt.30",
-        docs.clone(),
-        vec![docs[2].clone()], // Expect only the third document
-    );
 }

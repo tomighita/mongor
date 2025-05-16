@@ -1,5 +1,5 @@
 use mongodb::{Client, bson::Document, options::ClientOptions};
-use std::process::{Child, Command};
+use std::process::Child;
 use tokio::runtime::Runtime;
 
 use crate::utils::utils;
@@ -19,18 +19,17 @@ pub struct TestConfig {
     pub database_name: String,
 }
 
+// Use fixed ports for tests since they run serially
+static MONGODB_PORT: u16 = 27018;
+static APP_PORT: u16 = 8081;
+
 impl Default for TestConfig {
     fn default() -> Self {
-        // Use a random port for MongoDB to avoid conflicts
-        let mongodb_port = 27018 + (std::process::id() % 1000) as u16;
-        // Use a random port for the app to avoid conflicts
-        let app_port = 8081 + (std::process::id() % 1000) as u16;
-
         TestConfig {
-            mongodb_port,
-            mongodb_data_dir: format!("./test-dbpath/mongodb_test_data_{}", mongodb_port),
-            mongodb_log_path: format!("./test-dbpath/mongodb_test_{}.log", mongodb_port),
-            app_port,
+            mongodb_port: MONGODB_PORT,
+            mongodb_data_dir: format!("./test-dbpath/mongodb_test_data_{}", MONGODB_PORT),
+            mongodb_log_path: format!("./test-dbpath/mongodb_test_{}.log", MONGODB_PORT),
+            app_port: APP_PORT,
             database_name: "test".to_string(),
         }
     }
@@ -66,7 +65,7 @@ impl TestEnvironment {
 
         // Start the application
         println!("Starting application server...");
-        let app_process = Command::new("cargo")
+        let app_process = std::process::Command::new("cargo")
             .args(["run", "--", "--port", &config.app_port.to_string()])
             .env("DATABASE_CONN_URL", &mongodb_uri)
             .env("DATABASE_NAME", &config.database_name)

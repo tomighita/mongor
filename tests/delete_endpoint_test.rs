@@ -5,7 +5,7 @@ use serial_test::serial;
 // Import test environment and utilities from utils module
 mod utils;
 use utils::test_environment::TestEnvironment;
-use utils::utils::{make_http_request, make_delete_request};
+use utils::utils::{make_delete_request, make_http_request};
 
 // Base name for test collections
 static TEST_COLLECTION_BASE_NAME: &str = "mongor_delete_endpoint_test";
@@ -19,31 +19,22 @@ fn unique_collection_name(test_name: &str) -> String {
     )
 }
 
-/// Run a DELETE endpoint test with the given parameters
-///
-/// This function:
-/// 1. Creates a test environment (MongoDB + app)
-/// 2. Creates a collection with a unique name and inserts initial documents
-/// 3. Makes a DELETE request to delete documents matching the filter
-/// 4. Makes a GET request to verify the documents were deleted correctly
-/// 5. Automatically cleans up all processes when the test environment is dropped
-fn run_delete_endpoint_test(
+// Helper function to set up a test collection and perform a DELETE operation
+fn run_delete_test(
+    env: &TestEnvironment,
     test_name: &str,
-    initial_documents: Vec<Document>,
-    filter_query: &str,
-    expected_remaining_documents: Vec<Document>,
-) {
-    // Create test environment (starts MongoDB and app)
-    let env = TestEnvironment::new();
-
+    initial_docs: Vec<Document>,
+    query_params: &str,
+    expected_deleted_count: u64,
+) -> Vec<Document> {
     // Generate a unique collection name for this test
     let collection_name = unique_collection_name(test_name);
 
     // Insert initial test data
-    env.insert_test_data(&collection_name, initial_documents);
+    env.insert_test_data(&collection_name, initial_docs);
 
     // Make a DELETE request to our endpoint
-    let full_request_path = format!("/{}{}", collection_name, filter_query);
+    let full_request_path = format!("/{}{}", collection_name, query_params);
     let (status_code, body) = make_delete_request(&full_request_path);
 
     // Verify the response status code is 200 (OK)
@@ -56,10 +47,14 @@ fn run_delete_endpoint_test(
     // Parse the response to get the delete result
     let delete_result: serde_json::Value =
         serde_json::from_str(&body).expect("Failed to parse delete result");
-    
+
     // Verify that the delete was successful
-    assert!(delete_result["deletedCount"].as_u64().unwrap() > 0, 
-        "No documents were deleted");
+    assert_eq!(
+        delete_result["deletedCount"].as_u64().unwrap(),
+        expected_deleted_count,
+        "Expected {} documents to be deleted",
+        expected_deleted_count
+    );
 
     // Now make a GET request to verify the remaining documents
     let get_path = format!("/{}", collection_name);
@@ -76,91 +71,126 @@ fn run_delete_endpoint_test(
     let documents: Vec<Document> =
         serde_json::from_str(&get_body).expect("Failed to parse JSON response");
 
-    // Verify the remaining documents match the expected state after deletion
-    assert_eq!(
-        documents.len(), expected_remaining_documents.len(),
-        "Expected {} documents, got {}",
-        expected_remaining_documents.len(), documents.len()
-    );
-
-    // The test environment will be automatically cleaned up when it goes out of scope
+    // Return the remaining documents for further verification
+    documents
 }
 
 #[test]
 #[serial]
-fn test_delete_single_document() {
-    // Initial documents
-    let initial_docs = vec![
-        doc! {
-            "_id": 1,
-            "name": "first document"
-        },
-        doc! {
-            "_id": 2,
-            "name": "second document"
-        },
-    ];
+fn test_delete_endpoint_all_cases() {
+    // Create a single test environment for all test cases
+    let env = TestEnvironment::new();
 
-    // Run the test - delete document with _id=1
-    run_delete_endpoint_test(
-        "delete single document",
-        initial_docs.clone(),
-        "?_id=1",
-        vec![initial_docs[1].clone()], // Only the second document should remain
-    );
-}
+    // Test case 1: Delete a single document
+    {
+        // Initial documents
+        let initial_docs = vec![
+            doc! {
+                "_id": 1,
+                "name": "first document"
+            },
+            doc! {
+                "_id": 2,
+                "name": "second document"
+            },
+        ];
 
-#[test]
-#[serial]
-fn test_delete_multiple_documents() {
-    // Initial documents
-    let initial_docs = vec![
-        doc! {
-            "_id": 1,
-            "name": "first document",
-            "category": "A"
-        },
-        doc! {
-            "_id": 2,
-            "name": "second document",
-            "category": "A"
-        },
-        doc! {
-            "_id": 3,
-            "name": "third document",
-            "category": "B"
-        },
-    ];
+        // Run the delete test
+        let remaining_docs = run_delete_test(
+            &env,
+            "delete_single_document",
+            initial_docs,
+            "?_id=1",
+            1, // Expect 1 document to be deleted
+        );
 
-    // Run the test - delete all documents with category=A
-    run_delete_endpoint_test(
-        "delete multiple documents",
-        initial_docs.clone(),
-        "?category=A",
-        vec![initial_docs[2].clone()], // Only the third document should remain
-    );
-}
+        // Verify only the second document remains
+        assert_eq!(
+            remaining_docs.len(),
+            1,
+            "Expected 1 document, got {}",
+            remaining_docs.len()
+        );
+        assert_eq!(
+            remaining_docs[0]["_id"].as_i32().unwrap(),
+            2,
+            "Expected document with _id=2"
+        );
+    }
 
-#[test]
-#[serial]
-fn test_delete_all_documents() {
-    // Initial documents
-    let initial_docs = vec![
-        doc! {
-            "_id": 1,
-            "name": "first document"
-        },
-        doc! {
-            "_id": 2,
-            "name": "second document"
-        },
-    ];
+    // Test case 2: Delete multiple documents
+    {
+        // Initial documents
+        let initial_docs = vec![
+            doc! {
+                "_id": 1,
+                "name": "first document",
+                "category": "A"
+            },
+            doc! {
+                "_id": 2,
+                "name": "second document",
+                "category": "A"
+            },
+            doc! {
+                "_id": 3,
+                "name": "third document",
+                "category": "B"
+            },
+        ];
 
-    // Run the test - delete all documents (empty filter)
-    run_delete_endpoint_test(
-        "delete all documents",
-        initial_docs,
-        "",
-        Vec::new(), // No documents should remain
-    );
+        // Run the delete test
+        let remaining_docs = run_delete_test(
+            &env,
+            "delete_multiple_documents",
+            initial_docs,
+            "?category=A",
+            2, // Expect 2 documents to be deleted
+        );
+
+        // Verify only the third document remains
+        assert_eq!(
+            remaining_docs.len(),
+            1,
+            "Expected 1 document, got {}",
+            remaining_docs.len()
+        );
+        assert_eq!(
+            remaining_docs[0]["category"].as_str().unwrap(),
+            "B",
+            "Expected document with category=B"
+        );
+    }
+
+    // Test case 3: Delete all documents
+    {
+        // Initial documents
+        let initial_docs = vec![
+            doc! {
+                "_id": 1,
+                "name": "first document"
+            },
+            doc! {
+                "_id": 2,
+                "name": "second document"
+            },
+        ];
+
+        // Run the delete test
+        let remaining_docs = run_delete_test(
+            &env,
+            "delete_all_documents",
+            initial_docs,
+            "", // Empty query string to delete all documents
+            2,  // Expect 2 documents to be deleted
+        );
+
+        // Verify no documents remain
+        assert_eq!(
+            remaining_docs.len(),
+            0,
+            "Expected 0 documents, got {}",
+            remaining_docs.len()
+        );
+    }
 }

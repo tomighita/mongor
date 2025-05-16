@@ -112,10 +112,15 @@ pub fn wait_for_tcp_port(port: u16) {
     panic!("Timed out waiting for port {} to be available", port);
 }
 
+// The application server is now managed by TestEnvironment
+
 // Make HTTP GET request to the test server
 pub fn make_http_request(path: &str) -> (u16, String) {
-    // Use the default test config
-    make_http_request_with_port(path, TestConfig::default().app_port)
+    // Get the test config
+    let config = TestConfig::default();
+
+    // Make the request
+    make_http_request_with_port(path, config.app_port)
 }
 
 // Make HTTP GET request to a specific port
@@ -136,11 +141,10 @@ pub fn make_http_request_with_port(path: &str, port: u16) -> (u16, String) {
 
 // Make HTTP POST request with JSON body
 pub fn make_post_request(path: &str, json_body: &str) -> (u16, String) {
-    let url = format!(
-        "http://127.0.0.1:{}{}",
-        TestConfig::default().app_port,
-        path
-    );
+    // Get the test config
+    let config = TestConfig::default();
+
+    let url = format!("http://127.0.0.1:{}{}", config.app_port, path);
     let client = ReqwestClient::new();
 
     let response = client
@@ -158,11 +162,10 @@ pub fn make_post_request(path: &str, json_body: &str) -> (u16, String) {
 
 // Make HTTP PUT request with JSON body
 pub fn make_put_request(path: &str, json_body: &str) -> (u16, String) {
-    let url = format!(
-        "http://127.0.0.1:{}{}",
-        TestConfig::default().app_port,
-        path
-    );
+    // Get the test config
+    let config = TestConfig::default();
+
+    let url = format!("http://127.0.0.1:{}{}", config.app_port, path);
     let client = ReqwestClient::new();
 
     let response = client
@@ -180,11 +183,10 @@ pub fn make_put_request(path: &str, json_body: &str) -> (u16, String) {
 
 // Make HTTP PATCH request with JSON body
 pub fn make_patch_request(path: &str, json_body: &str) -> (u16, String) {
-    let url = format!(
-        "http://127.0.0.1:{}{}",
-        TestConfig::default().app_port,
-        path
-    );
+    // Get the test config
+    let config = TestConfig::default();
+
+    let url = format!("http://127.0.0.1:{}{}", config.app_port, path);
     let client = ReqwestClient::new();
 
     let response = client
@@ -202,11 +204,10 @@ pub fn make_patch_request(path: &str, json_body: &str) -> (u16, String) {
 
 // Make HTTP DELETE request
 pub fn make_delete_request(path: &str) -> (u16, String) {
-    let url = format!(
-        "http://127.0.0.1:{}{}",
-        TestConfig::default().app_port,
-        path
-    );
+    // Get the test config
+    let config = TestConfig::default();
+
+    let url = format!("http://127.0.0.1:{}{}", config.app_port, path);
     let client = ReqwestClient::new();
 
     let response = client
@@ -218,4 +219,18 @@ pub fn make_delete_request(path: &str) -> (u16, String) {
     let body = response.text().expect("Failed to read HTTP response");
 
     (status_code, body)
+}
+
+// Kill the application server if it's running
+pub fn kill_app_server() {
+    // Get the test config
+    let config = TestConfig::default();
+
+    // Kill app on port
+    let app_pattern = format!("mongor.*{}", config.app_port);
+    let _ = std::process::Command::new("pkill")
+        .args(["-f", &app_pattern])
+        .output();
+
+    println!("Killed application server on port {}", config.app_port);
 }

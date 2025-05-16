@@ -19,31 +19,22 @@ fn unique_collection_name(test_name: &str) -> String {
     )
 }
 
-/// Run a query endpoint test with the given parameters
-///
-/// This function:
-/// 1. Creates a test environment (MongoDB + app)
-/// 2. Creates a collection with a unique name and inserts test documents
-/// 3. Makes a request to the endpoint
-/// 4. Verifies the response matches the expected documents
-/// 5. Automatically cleans up all processes when the test environment is dropped
-fn run_get_endpoint_test(
+// Helper function to set up a test collection and perform a GET operation
+fn run_get_test(
+    env: &TestEnvironment,
     test_name: &str,
-    request_path: &str,
-    test_documents: Vec<Document>,
-    expected_documents: Vec<Document>,
+    test_docs: Vec<Document>,
+    query_params: &str,
+    expected_docs: Vec<Document>,
 ) {
-    // Create test environment (starts MongoDB and app)
-    let env = TestEnvironment::new();
-
     // Generate a unique collection name for this test
     let collection_name = unique_collection_name(test_name);
 
-    // Insert test data (the insert_test_data method will drop the collection first)
-    env.insert_test_data(&collection_name, test_documents);
+    // Insert test data
+    env.insert_test_data(&collection_name, test_docs);
 
     // Make a request to our endpoint
-    let full_request_path = format!("/{}{}", collection_name, request_path);
+    let full_request_path = format!("/{}{}", collection_name, query_params);
     let (status_code, body) = make_http_request(&full_request_path);
 
     // Verify the response
@@ -57,78 +48,87 @@ fn run_get_endpoint_test(
     let documents: Vec<Document> =
         serde_json::from_str(&body).expect("Failed to parse JSON response");
 
-    // Verify the response matches expected documents directly
+    // Verify the response matches expected documents
     assert_eq!(
-        documents, expected_documents,
+        documents, expected_docs,
         "Documents don't match expected values"
     );
+}
+
+#[test]
+#[serial]
+fn test_get_endpoint_all_cases() {
+    // Create a single test environment for all test cases
+    let env = TestEnvironment::new();
+
+    // Test case 1: Get with matching document
+    {
+        // Test document
+        let test_doc = doc! {
+            "_id": 1,
+            "name": "test document"
+        };
+
+        // Run the get test
+        run_get_test(
+            &env,
+            "matching_document",
+            vec![test_doc.clone()],
+            "?_id=1",
+            vec![test_doc],
+        );
+    }
+
+    // Test case 2: Get with non-existent document
+    {
+        // Test document (to ensure collection exists)
+        let test_doc = doc! {
+            "_id": 1,
+            "name": "test document"
+        };
+
+        // Run the get test
+        run_get_test(
+            &env,
+            "non_existent_document",
+            vec![test_doc],
+            "?_id=999",
+            Vec::new(), // Expect empty array
+        );
+    }
+
+    // Test case 3: Get with multiple documents
+    {
+        // Test documents
+        let docs = vec![
+            doc! {
+                "_id": 1,
+                "name": "first document",
+                "category": "A"
+            },
+            doc! {
+                "_id": 2,
+                "name": "second document",
+                "category": "A"
+            },
+            doc! {
+                "_id": 3,
+                "name": "third document",
+                "category": "B"
+            },
+        ];
+
+        // Run the get test
+        run_get_test(
+            &env,
+            "multiple_documents",
+            docs.clone(),
+            "?category=A",
+            vec![docs[0].clone(), docs[1].clone()],
+        );
+    }
+
+    // The TestEnvironment will clean up processes when it's dropped
 
     // The test environment will be automatically cleaned up when it goes out of scope
-}
-
-#[test]
-#[serial]
-fn test_get_with_matching_document() {
-    // Test document
-    let test_doc = doc! {
-        "_id": 1,
-        "name": "test document"
-    };
-
-    // Run the test
-    run_get_endpoint_test(
-        "matching document",
-        "?_id=1",
-        vec![test_doc.clone()],
-        vec![test_doc],
-    );
-}
-
-#[test]
-#[serial]
-fn test_get_with_non_existent_document() {
-    // Test document (to ensure collection exists)
-    let test_doc = doc! {
-        "_id": 1,
-        "name": "test document"
-    };
-
-    // Run the test
-    run_get_endpoint_test(
-        "non-existent document",
-        "?_id=999",
-        vec![test_doc],
-        Vec::new(), // Expect empty array
-    );
-}
-
-#[test]
-#[serial]
-fn test_get_with_multiple_documents() {
-    // Test documents
-    let docs = vec![
-        doc! {
-            "_id": 1,
-            "name": "first document",
-            "category": "A"
-        },
-        doc! {
-            "_id": 2,
-            "name": "second document",
-            "category": "A"
-        },
-        doc! {
-            "_id": 3,
-            "name": "third document",
-            "category": "B"
-        },
-    ];
-
-    // Run the test for category A
-    run_get_endpoint_test(
-        "multiple documents",
-        "?category=A",
-        docs.clone(),
-        vec![docs[0].clone(), docs[1].clone()], // Expect first two documents
-    );
 }
