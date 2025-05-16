@@ -11,3 +11,9 @@ InnerFilter -> ArrayOp=(InnerFilters)
 
 ArrayOp -> and
 ArrayOp -> or
+
+ComparisonOp -> eq
+ComparisonOp -> lt
+ComparisonOp -> gt
+ComparisonOp -> lte
+ComparisonOp -> gte

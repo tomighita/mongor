@@ -1545,6 +1545,7 @@ dependencies = [
 name = "mongor"
 version = "0.1.0"
 dependencies = [
+ "actix-http",
  "actix-web",
  "dotenv",
  "futures",
