@@ -177,6 +177,4 @@ fn test_query_parser_all_cases() {
             "Documents don't match expected values"
         );
     }
-
-    // The test environment will be automatically cleaned up when it goes out of scope
 }

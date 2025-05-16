@@ -127,8 +127,4 @@ fn test_get_endpoint_all_cases() {
             vec![docs[0].clone(), docs[1].clone()],
         );
     }
-
-    // The TestEnvironment will clean up processes when it's dropped
-
-    // The test environment will be automatically cleaned up when it goes out of scope
 }
