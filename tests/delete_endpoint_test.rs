@@ -5,7 +5,7 @@ use serial_test::serial;
 // Import test environment and utilities from utils module
 mod utils;
 use utils::test_environment::TestEnvironment;
-use utils::utils::{make_delete_request, make_http_request};
+use utils::utils::{make_delete_request, make_get_request};
 
 // Base name for test collections
 static TEST_COLLECTION_BASE_NAME: &str = "mongor_delete_endpoint_test";
@@ -58,7 +58,7 @@ fn run_delete_test(
 
     // Now make a GET request to verify the remaining documents
     let get_path = format!("/{}", collection_name);
-    let (get_status_code, get_body) = make_http_request(&get_path);
+    let (get_status_code, get_body) = make_get_request(&get_path);
 
     // Verify the GET response
     assert_eq!(

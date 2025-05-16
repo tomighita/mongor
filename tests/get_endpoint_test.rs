@@ -5,7 +5,7 @@ use serial_test::serial;
 // Import test environment and utilities from utils module
 mod utils;
 use utils::test_environment::TestEnvironment;
-use utils::utils::make_http_request;
+use utils::utils::make_get_request;
 
 // Base name for test collections
 static TEST_COLLECTION_BASE_NAME: &str = "mongor_get_endpoint_test";
@@ -35,7 +35,7 @@ fn run_get_test(
 
     // Make a request to our endpoint
     let full_request_path = format!("/{}{}", collection_name, query_params);
-    let (status_code, body) = make_http_request(&full_request_path);
+    let (status_code, body) = make_get_request(&full_request_path);
 
     // Verify the response
     assert_eq!(

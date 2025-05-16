@@ -5,7 +5,7 @@ use serial_test::serial;
 // Import test environment and utilities from utils module
 mod utils;
 use utils::test_environment::TestEnvironment;
-use utils::utils::{make_http_request, make_post_request};
+use utils::utils::{make_get_request, make_post_request};
 
 // Base name for test collections
 static TEST_COLLECTION_BASE_NAME: &str = "mongor_post_endpoint_test";
@@ -42,7 +42,7 @@ fn run_post_test(env: &TestEnvironment, test_name: &str, document: Document) {
     );
 
     // Now make a GET request to verify the document was inserted
-    let (get_status_code, get_body) = make_http_request(&full_request_path);
+    let (get_status_code, get_body) = make_get_request(&full_request_path);
 
     // Verify the GET response
     assert_eq!(

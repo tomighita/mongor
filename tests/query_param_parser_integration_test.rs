@@ -5,7 +5,7 @@ use serial_test::serial;
 // Import test environment and utilities from utils module
 mod utils;
 use utils::test_environment::TestEnvironment;
-use utils::utils::make_http_request;
+use utils::utils::make_get_request;
 
 // Base name for test collections
 static TEST_COLLECTION_BASE_NAME: &str = "mongor_query_parser_test";
@@ -54,7 +54,7 @@ fn test_query_parser_all_cases() {
 
         // Make a request to our endpoint
         let full_request_path = format!("/{}?age=30", collection_name);
-        let (status_code, body) = make_http_request(&full_request_path);
+        let (status_code, body) = make_get_request(&full_request_path);
 
         // Verify the response
         assert_eq!(
@@ -104,7 +104,7 @@ fn test_query_parser_all_cases() {
 
         // Make a request to our endpoint
         let full_request_path = format!("/{}?age=gt.30", collection_name);
-        let (status_code, body) = make_http_request(&full_request_path);
+        let (status_code, body) = make_get_request(&full_request_path);
 
         // Verify the response
         assert_eq!(
@@ -157,7 +157,7 @@ fn test_query_parser_all_cases() {
 
         // Make a request to our endpoint
         let full_request_path = format!("/{}?age=gt.30", collection_name);
-        let (status_code, body) = make_http_request(&full_request_path);
+        let (status_code, body) = make_get_request(&full_request_path);
 
         // Verify the response
         assert_eq!(
