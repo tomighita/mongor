@@ -3,8 +3,8 @@ use futures_util::TryStreamExt;
 use mongodb::bson::doc;
 use serde_json::Value;
 
-use crate::shared::AppState;
-use mongor::parse_query_params;
+use crate::{query_param_parser::parse_find_options, shared::AppState};
+use mongor::parse_match_query_params;
 
 #[get("/")]
 async fn hello() -> impl Responder {
@@ -36,8 +36,12 @@ async fn query_collection(
 ) -> impl Responder {
     let coll_name = path.into_inner();
 
+    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data) {
+        return e;
+    }
+
     // Parse query parameters
-    let filter = match parse_query_params(&query) {
+    let filter = match parse_match_query_params(&query) {
         Ok(filter) => filter,
         Err(e) => {
             return HttpResponse::BadRequest().body(format!("Invalid query parameter: {}", e));
@@ -50,6 +54,7 @@ async fn query_collection(
         .database(&data.config.database_name)
         .collection::<mongodb::bson::Document>(&coll_name)
         .find(filter)
+        .with_options(parse_find_options(&query))
         .await
     {
         Ok(cursor) => {
@@ -77,6 +82,10 @@ async fn insert_document(
     data: web::Data<AppState>,
 ) -> impl Responder {
     let coll_name = path.into_inner();
+
+    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data) {
+        return e;
+    }
 
     // Convert the JSON payload to a MongoDB document
     let document = match mongodb::bson::to_document(&payload) {
@@ -111,8 +120,12 @@ async fn update_document(
 ) -> impl Responder {
     let coll_name = path.into_inner();
 
+    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data) {
+        return e;
+    }
+
     // Parse query parameters for filter
-    let filter = match parse_query_params(&query) {
+    let filter = match parse_match_query_params(&query) {
         Ok(filter) => filter,
         Err(e) => {
             return HttpResponse::BadRequest().body(format!("Invalid query parameter: {}", e));
@@ -165,8 +178,12 @@ async fn patch_document(
     // We need to reimplement the logic here since we can't call the handler directly
     let coll_name = path.into_inner();
 
+    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data) {
+        return e;
+    }
+
     // Parse query parameters for filter
-    let filter = match parse_query_params(&query) {
+    let filter = match parse_match_query_params(&query) {
         Ok(filter) => filter,
         Err(e) => {
             return HttpResponse::BadRequest().body(format!("Invalid query parameter: {}", e));
@@ -208,8 +225,12 @@ async fn delete_document(
 ) -> impl Responder {
     let coll_name = path.into_inner();
 
+    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data) {
+        return e;
+    }
+
     // Parse query parameters for filter
-    let filter = match parse_query_params(&query) {
+    let filter = match parse_match_query_params(&query) {
         Ok(filter) => filter,
         Err(e) => {
             return HttpResponse::BadRequest().body(format!("Invalid query parameter: {}", e));
@@ -239,4 +260,26 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .service(update_document)
         .service(patch_document)
         .service(delete_document);
+}
+
+fn get_exception_if_collection_absent(
+    collection_name: &str,
+    data: &web::Data<AppState>,
+) -> Option<HttpResponse> {
+    match crate::catalog::get_cached_collections(&data) {
+        Some(catalog) => match catalog
+            .collection_specs
+            .iter()
+            .find(|c| c.name == collection_name)
+        {
+            Some(_) => None,
+            None => Some(HttpResponse::NotFound().body(format!(
+                "Collection {} not found",
+                collection_name.to_owned()
+            ))),
+        },
+        None => {
+            Some(HttpResponse::InternalServerError().body("Could not access collections catalog"))
+        }
+    }
 }

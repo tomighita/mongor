@@ -1,4 +1,7 @@
-use mongodb::bson::{Bson, Document, bson, doc};
+use mongodb::{
+    bson::{Bson, Document, bson, doc},
+    options::FindOptions,
+};
 use std::collections::HashMap;
 
 type Number = f64;
@@ -132,6 +135,7 @@ impl Lexer {
                 '(' | ')' | ',' | '.' | '=' => LexItem::SpecialChar(self.next_char().unwrap()),
                 '"' => LexItem::Symbol(Value::Str(self.read_string())),
                 '0'..='9' | '-' => LexItem::Symbol(Value::Num(self.read_number())),
+                ' ' => LexItem::SpecialChar(self.next_char().unwrap()),
                 _ => {
                     let ident = self.read_symbol();
                     match ident.as_str() {
@@ -347,18 +351,39 @@ pub fn parse(key: &str, value: &str) -> Result<Bson, String> {
 ///
 /// * `Result<Document, String>` - A MongoDB filter document or an error message
 #[allow(dead_code)]
-pub fn parse_query_params(query_params: &HashMap<String, String>) -> Result<Document, String> {
+pub fn parse_match_query_params(
+    query_params: &HashMap<String, String>,
+) -> Result<Document, String> {
     let mut filter = doc! {};
 
-    for (field_name, field_value) in query_params.iter() {
-        match parse(field_name, field_value) {
-            Ok(Bson::Document(doc)) => filter.extend(doc),
-            Ok(val) => return Err(format!("Unexpected bson: {}", val)),
-            Err(err) => return Err(err),
+    for (query_param, field_value) in query_params.iter() {
+        // Skip "reserved" key words.
+        match query_param.as_str() {
+            "limit" | "skip" => continue,
+            field_name => match parse(field_name, field_value) {
+                Ok(Bson::Document(doc)) => filter.extend(doc),
+                Ok(val) => return Err(format!("Unexpected bson: {}", val)),
+                Err(err) => return Err(err),
+            },
         }
     }
 
     Ok(filter)
+}
+
+pub fn parse_find_options(query_params: &HashMap<String, String>) -> FindOptions {
+    let limit_value = match query_params.get("limit") {
+        Some(limit) => limit.parse::<i64>().unwrap_or(100),
+        None => 100,
+    };
+    let skip_value = match query_params.get("skip") {
+        Some(skip) => skip.parse::<u64>().unwrap_or(0),
+        None => 0,
+    };
+    FindOptions::builder()
+        .limit(limit_value)
+        .skip(skip_value)
+        .build()
 }
 
 #[cfg(test)]
@@ -369,9 +394,18 @@ mod tests {
     #[test]
     fn test_parse_query_params_empty() {
         let query_params = HashMap::new();
-        let result = parse_query_params(&query_params);
+        let result = parse_match_query_params(&query_params);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), doc! {});
+    }
+
+    #[test]
+    fn test_parse_query_params_single_string() {
+        let mut query_params = HashMap::new();
+        query_params.insert("title".to_owned(), "\"The Perils of Pauline\"".to_owned());
+        let result = parse_match_query_params(&query_params);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), doc! {"title": "The Perils of Pauline"});
     }
 
     #[test]
@@ -379,7 +413,7 @@ mod tests {
         let mut query_params = HashMap::new();
         query_params.insert("name".to_string(), "john".to_string());
 
-        let result = parse_query_params(&query_params);
+        let result = parse_match_query_params(&query_params);
         assert!(result.is_ok());
 
         let filter = result.unwrap();
@@ -391,7 +425,7 @@ mod tests {
         let mut query_params = HashMap::new();
         query_params.insert("age".to_string(), "30".to_string());
 
-        let result = parse_query_params(&query_params);
+        let result = parse_match_query_params(&query_params);
         assert!(result.is_ok());
 
         let filter = result.unwrap();
@@ -404,7 +438,7 @@ mod tests {
         query_params.insert("name".to_string(), "john".to_string());
         query_params.insert("age".to_string(), "30".to_string());
 
-        let result = parse_query_params(&query_params);
+        let result = parse_match_query_params(&query_params);
         assert!(
             result.is_ok(),
             "Failed to parse query params: {:?}",
@@ -420,7 +454,7 @@ mod tests {
         let mut query_params = HashMap::new();
         query_params.insert("age".to_string(), "gt.25".to_string());
 
-        let result = parse_query_params(&query_params);
+        let result = parse_match_query_params(&query_params);
         assert!(result.is_ok());
 
         let filter = result.unwrap();
@@ -435,7 +469,7 @@ mod tests {
         let mut query_params = HashMap::new();
         query_params.insert("or".to_string(), "(age.gt.25,name.eq.john)".to_string());
 
-        let result = parse_query_params(&query_params);
+        let result = parse_match_query_params(&query_params);
         assert!(result.is_ok());
 
         let filter = result.unwrap();
