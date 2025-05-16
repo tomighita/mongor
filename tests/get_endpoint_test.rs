@@ -128,3 +128,163 @@ fn test_get_endpoint_all_cases() {
         );
     }
 }
+
+#[test]
+#[serial]
+fn test_query_parser_all_cases() {
+    // Create a single test environment for all test cases
+    let env = TestEnvironment::new();
+
+    // Test case 1: Simple field value query
+    {
+        // Test documents
+        let docs = vec![
+            doc! {
+                "_id": 1,
+                "name": "first document",
+                "age": 25
+            },
+            doc! {
+                "_id": 2,
+                "name": "second document",
+                "age": 30
+            },
+            doc! {
+                "_id": 3,
+                "name": "third document",
+                "age": 35
+            },
+        ];
+
+        // Run the get test
+        run_get_test(
+            &env,
+            "simple_field_value",
+            docs.clone(),
+            "?age=30",
+            vec![docs[1].clone()],
+        );
+    }
+
+    // Test case 2: Advanced comparison query
+    {
+        // Test documents
+        let docs = vec![
+            doc! {
+                "_id": 1,
+                "name": "first document",
+                "age": 25
+            },
+            doc! {
+                "_id": 2,
+                "name": "second document",
+                "age": 30
+            },
+            doc! {
+                "_id": 3,
+                "name": "third document",
+                "age": 35
+            },
+        ];
+
+        // Run the get test
+        run_get_test(
+            &env,
+            "advanced_comparison",
+            docs.clone(),
+            "?age=gt.30",
+            vec![docs[2].clone()],
+        );
+    }
+
+    // Test case 3: Advanced logical query
+    {
+        // Test documents
+        let docs = vec![
+            doc! {
+                "_id": 1,
+                "name": "first document",
+                "age": 25,
+                "category": "A"
+            },
+            doc! {
+                "_id": 2,
+                "name": "second document",
+                "age": 30,
+                "category": "B"
+            },
+            doc! {
+                "_id": 3,
+                "name": "third document",
+                "age": 35,
+                "category": "A"
+            },
+        ];
+
+        // Run the get test
+        run_get_test(
+            &env,
+            "advanced_logical",
+            docs.clone(),
+            "?age=gt.30",
+            vec![docs[2].clone()],
+        );
+    }
+
+    // Test case 4: Complex nested query with and/or predicates
+    {
+        // Test documents with more fields for complex filtering
+        let docs = vec![
+            doc! {
+                "_id": 1,
+                "name": "first document",
+                "age": 25,
+                "category": "A",
+                "status": "active",
+                "score": 85
+            },
+            doc! {
+                "_id": 2,
+                "name": "second document",
+                "age": 30,
+                "category": "B",
+                "status": "inactive",
+                "score": 92
+            },
+            doc! {
+                "_id": 3,
+                "name": "third document",
+                "age": 35,
+                "category": "A",
+                "status": "active",
+                "score": 78
+            },
+            doc! {
+                "_id": 4,
+                "name": "fourth document",
+                "age": 40,
+                "category": "C",
+                "status": "active",
+                "score": 95
+            },
+            doc! {
+                "_id": 5,
+                "name": "fifth document",
+                "age": 28,
+                "category": "B",
+                "status": "active",
+                "score": 88
+            },
+        ];
+
+        // Complex query: (category=A AND score<80) OR (age>35 AND status=active)
+        // This should match document 3 (category A, score 78) and document 4 (age 40, status active)
+        run_get_test(
+            &env,
+            "complex_nested_query",
+            docs.clone(),
+            "?or=(and=(category.A,score.lt.80),and=(age.gt.35,status.active))",
+            vec![docs[2].clone(), docs[3].clone()],
+        );
+    }
+}
