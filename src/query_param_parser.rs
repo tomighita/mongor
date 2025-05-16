@@ -1,7 +1,8 @@
 use mongodb::{
-    bson::{Bson, Document, bson, doc},
+    bson::{self, Bson, Document, bson, doc, oid::ObjectId},
     options::FindOptions,
 };
+use serde_json;
 use std::collections::HashMap;
 
 type Number = f64;
@@ -10,6 +11,7 @@ type Number = f64;
 pub enum Value {
     Str(String),
     Num(Number),
+    ExtendedJson(serde_json::Value),
 }
 
 impl PartialEq for Value {
@@ -28,7 +30,7 @@ pub enum LexItem {
     ComparisonOperator(String), // 'eq', 'ne', 'lt', 'gt', 'lte', 'gte'
     SpecialChar(char),          // Specoal characters like `(` `)` `,` `.`
     ArrayOp(String),            // "and", "or"
-    Symbol(Value),              // Number, String
+    Symbol(Value),              // Number, String, ObjectId
 }
 
 pub struct Lexer {
@@ -74,11 +76,11 @@ impl Lexer {
         let mut result = String::new();
 
         while let Some(c) = self.peek() {
-            if c.is_alphanumeric() {
-                result.push(self.next_char().unwrap());
-            } else {
+            if !c.is_alphanumeric() {
                 break;
             }
+
+            result.push(self.next_char().unwrap());
         }
 
         result
@@ -129,11 +131,35 @@ impl Lexer {
         result.parse().unwrap_or(0.0)
     }
 
+    pub fn read_json(&mut self) -> Result<serde_json::Value, String> {
+        let mut result = String::from(self.next_char().unwrap());
+        let mut brace_count = 1;
+
+        while let Some(c) = self.peek() {
+            match c {
+                '{' => brace_count += 1,
+                '}' => brace_count -= 1,
+                _ => {}
+            }
+            result.push(self.next_char().unwrap());
+            if brace_count == 0 {
+                break;
+            }
+        }
+
+        if brace_count != 0 {
+            return Err(String::from("Invalid JSON"));
+        }
+
+        serde_json::from_str(&result).unwrap()
+    }
+
     fn next_token(&mut self) -> Option<LexItem> {
         self.peek().map(|c| {
             match c {
                 '(' | ')' | ',' | '.' | '=' => LexItem::SpecialChar(self.next_char().unwrap()),
                 '"' => LexItem::Symbol(Value::Str(self.read_string())),
+                '{' => LexItem::Symbol(Value::ExtendedJson(self.read_json().unwrap())),
                 '0'..='9' | '-' => LexItem::Symbol(Value::Num(self.read_number())),
                 ' ' => LexItem::SpecialChar(self.next_char().unwrap()),
                 _ => {
@@ -211,6 +237,14 @@ impl Parser {
         }
     }
 
+    fn parse_value(value: Value) -> Bson {
+        match value {
+            Value::Num(n) => Bson::Double(n),
+            Value::Str(s) => Bson::String(s),
+            Value::ExtendedJson(j) => mongodb::bson::to_bson(&j).unwrap(),
+        }
+    }
+
     fn parse_inner_filter(&mut self) -> Result<Bson, String> {
         let first_token = self.advance();
         let second_token = self.advance();
@@ -222,10 +256,7 @@ impl Parser {
                         let bson_key = Parser::comparison_op_to_bson_key(operator.as_str())?;
                         match (self.advance(), self.advance()) {
                             (Some(LexItem::SpecialChar('.')), Some(LexItem::Symbol(value))) => {
-                                let bson_value = match value {
-                                    Value::Str(s) => Bson::String(s),
-                                    Value::Num(n) => Bson::Double(n),
-                                };
+                                let bson_value = Parser::parse_value(value);
                                 Ok(bson!({ field_name: { bson_key: bson_value }}))
                             }
                             _ => Err(self.return_error_msg()),
@@ -233,10 +264,7 @@ impl Parser {
                     }
                     // Case Field.Value
                     Some(LexItem::Symbol(val)) => {
-                        let bson_value = match val {
-                            Value::Num(n) => Bson::Double(n),
-                            Value::Str(s) => Bson::String(s),
-                        };
+                        let bson_value = Parser::parse_value(val);
                         Ok(bson!({ field_name: bson_value}))
                     }
                     _ => Err(self.return_error_msg()),
@@ -290,10 +318,7 @@ impl Parser {
                 // Case TopLevelExpr -> Field=Value
                 Some(LexItem::Symbol(val)) => {
                     self.advance();
-                    let bson_value = match val {
-                        Value::Str(s) => Bson::String(s.clone()),
-                        Value::Num(n) => Bson::Double(n),
-                    };
+                    let bson_value = Parser::parse_value(val);
                     return Ok(bson!({key: bson_value}));
                 }
                 // Case TopLevelExpr -> Field=ComparisonOp.Value
@@ -305,10 +330,7 @@ impl Parser {
                             Some(LexItem::Symbol(value)),
                         ) => {
                             let mql_comparison_op = Parser::comparison_op_to_bson_key(op.as_str())?;
-                            let bson_value = match value {
-                                Value::Str(s) => Bson::String(s.clone()),
-                                Value::Num(n) => Bson::Double(n),
-                            };
+                            let bson_value = Parser::parse_value(value);
                             Ok(bson!({ key: {mql_comparison_op: bson_value} }))
                         }
                         _ => Err(self.return_error_msg()),

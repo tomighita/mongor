@@ -20,3 +20,5 @@ ComparisonOp -> gte
 
 Value -> Number
 Value -> String
+# https://www.mongodb.com/docs/manual/reference/mongodb-extended-json/
+Value -> ExtendedJson
