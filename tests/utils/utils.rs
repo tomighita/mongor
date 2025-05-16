@@ -112,21 +112,42 @@ pub fn wait_for_tcp_port(port: u16) {
     panic!("Timed out waiting for port {} to be available", port);
 }
 
+// The application server is now managed by TestEnvironment
+
 // Make HTTP GET request to the test server
-pub fn make_http_request(path: &str) -> (u16, String) {
-    // Use the default test config
-    make_http_request_with_port(path, TestConfig::default().app_port)
+pub fn make_get_request(path: &str) -> (u16, String) {
+    // Make the request
+    make_http_request(path, "GET", None)
 }
 
-// Make HTTP GET request to a specific port
-pub fn make_http_request_with_port(path: &str, port: u16) -> (u16, String) {
+// Make HTTP request with specified method and optional JSON body
+pub fn make_http_request(path: &str, method: &str, json_body: Option<&str>) -> (u16, String) {
+    // Get the test config
+    let config = TestConfig::default();
+    let port = config.app_port;
+
     let url = format!("http://127.0.0.1:{}{}", port, path);
     let client = ReqwestClient::new();
 
-    let response = client
-        .get(&url)
+    let mut request = match method {
+        "GET" => client.get(&url),
+        "POST" => client.post(&url),
+        "PUT" => client.put(&url),
+        "PATCH" => client.patch(&url),
+        "DELETE" => client.delete(&url),
+        _ => panic!("Unsupported HTTP method: {}", method),
+    };
+
+    // Add JSON body if provided
+    if let Some(body) = json_body {
+        request = request
+            .header("Content-Type", "application/json")
+            .body(body.to_string());
+    }
+
+    let response = request
         .send()
-        .expect("Failed to send HTTP request");
+        .expect(&format!("Failed to send {} request", method));
 
     let status_code = response.status().as_u16();
     let body = response.text().expect("Failed to read HTTP response");
@@ -136,86 +157,34 @@ pub fn make_http_request_with_port(path: &str, port: u16) -> (u16, String) {
 
 // Make HTTP POST request with JSON body
 pub fn make_post_request(path: &str, json_body: &str) -> (u16, String) {
-    let url = format!(
-        "http://127.0.0.1:{}{}",
-        TestConfig::default().app_port,
-        path
-    );
-    let client = ReqwestClient::new();
-
-    let response = client
-        .post(&url)
-        .header("Content-Type", "application/json")
-        .body(json_body.to_string())
-        .send()
-        .expect("Failed to send POST request");
-
-    let status_code = response.status().as_u16();
-    let body = response.text().expect("Failed to read HTTP response");
-
-    (status_code, body)
+    make_http_request(path, "POST", Some(json_body))
 }
 
 // Make HTTP PUT request with JSON body
 pub fn make_put_request(path: &str, json_body: &str) -> (u16, String) {
-    let url = format!(
-        "http://127.0.0.1:{}{}",
-        TestConfig::default().app_port,
-        path
-    );
-    let client = ReqwestClient::new();
-
-    let response = client
-        .put(&url)
-        .header("Content-Type", "application/json")
-        .body(json_body.to_string())
-        .send()
-        .expect("Failed to send PUT request");
-
-    let status_code = response.status().as_u16();
-    let body = response.text().expect("Failed to read HTTP response");
-
-    (status_code, body)
+    make_http_request(path, "PUT", Some(json_body))
 }
 
 // Make HTTP PATCH request with JSON body
 pub fn make_patch_request(path: &str, json_body: &str) -> (u16, String) {
-    let url = format!(
-        "http://127.0.0.1:{}{}",
-        TestConfig::default().app_port,
-        path
-    );
-    let client = ReqwestClient::new();
-
-    let response = client
-        .patch(&url)
-        .header("Content-Type", "application/json")
-        .body(json_body.to_string())
-        .send()
-        .expect("Failed to send PATCH request");
-
-    let status_code = response.status().as_u16();
-    let body = response.text().expect("Failed to read HTTP response");
-
-    (status_code, body)
+    make_http_request(path, "PATCH", Some(json_body))
 }
 
 // Make HTTP DELETE request
 pub fn make_delete_request(path: &str) -> (u16, String) {
-    let url = format!(
-        "http://127.0.0.1:{}{}",
-        TestConfig::default().app_port,
-        path
-    );
-    let client = ReqwestClient::new();
+    make_http_request(path, "DELETE", None)
+}
 
-    let response = client
-        .delete(&url)
-        .send()
-        .expect("Failed to send DELETE request");
+// Kill the application server if it's running
+pub fn kill_app_server() {
+    // Get the test config
+    let config = TestConfig::default();
 
-    let status_code = response.status().as_u16();
-    let body = response.text().expect("Failed to read HTTP response");
+    // Kill app on port
+    let app_pattern = format!("mongor.*{}", config.app_port);
+    let _ = std::process::Command::new("pkill")
+        .args(["-f", &app_pattern])
+        .output();
 
-    (status_code, body)
+    println!("Killed application server on port {}", config.app_port);
 }

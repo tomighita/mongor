@@ -36,7 +36,7 @@ async fn query_collection(
 ) -> impl Responder {
     let coll_name = path.into_inner();
 
-    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data) {
+    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data).await {
         return e;
     }
 
@@ -83,7 +83,7 @@ async fn insert_document(
 ) -> impl Responder {
     let coll_name = path.into_inner();
 
-    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data) {
+    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data).await {
         return e;
     }
 
@@ -120,7 +120,7 @@ async fn update_document(
 ) -> impl Responder {
     let coll_name = path.into_inner();
 
-    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data) {
+    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data).await {
         return e;
     }
 
@@ -178,7 +178,7 @@ async fn patch_document(
     // We need to reimplement the logic here since we can't call the handler directly
     let coll_name = path.into_inner();
 
-    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data) {
+    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data).await {
         return e;
     }
 
@@ -225,7 +225,7 @@ async fn delete_document(
 ) -> impl Responder {
     let coll_name = path.into_inner();
 
-    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data) {
+    if let Some(e) = get_exception_if_collection_absent(coll_name.as_str(), &data).await {
         return e;
     }
 
@@ -262,7 +262,7 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .service(delete_document);
 }
 
-fn get_exception_if_collection_absent(
+async fn get_exception_if_collection_absent(
     collection_name: &str,
     data: &web::Data<AppState>,
 ) -> Option<HttpResponse> {
@@ -273,10 +273,29 @@ fn get_exception_if_collection_absent(
             .find(|c| c.name == collection_name)
         {
             Some(_) => None,
-            None => Some(HttpResponse::NotFound().body(format!(
-                "Collection {} not found",
-                collection_name.to_owned()
-            ))),
+            None => {
+                match data
+                    .db_client
+                    .database(&data.config.database_name)
+                    .list_collection_names()
+                    .await
+                {
+                    Ok(names) => {
+                        if names.contains(&collection_name.to_string()) {
+                            None
+                        } else {
+                            Some(HttpResponse::NotFound().body(format!(
+                                "Collection {} not found",
+                                collection_name.to_owned()
+                            )))
+                        }
+                    }
+                    Err(_) => Some(
+                        HttpResponse::InternalServerError()
+                            .body("Failed to check collection existence"),
+                    ),
+                }
+            }
         },
         None => {
             Some(HttpResponse::InternalServerError().body("Could not access collections catalog"))
