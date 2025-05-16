@@ -17,3 +17,6 @@ ComparisonOp -> lt
 ComparisonOp -> gt
 ComparisonOp -> lte
 ComparisonOp -> gte
+
+Value -> Number
+Value -> String
