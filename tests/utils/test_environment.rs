@@ -108,8 +108,26 @@ impl TestEnvironment {
                     .insert_many(documents)
                     .await
                     .expect("Failed to insert test data");
+            } else {
+                // Even if there are no documents to insert, create the collection
+                // by inserting and then removing a dummy document
+                let dummy_doc = Document::new();
+                collection
+                    .insert_one(dummy_doc)
+                    .await
+                    .expect("Failed to insert dummy document");
+
+                collection
+                    .delete_many(Document::new())
+                    .await
+                    .expect("Failed to remove dummy document");
+
+                println!("Created empty collection {}", collection_name);
             }
         });
+
+        // Wait a moment for the collection to be recognized by the server
+        std::thread::sleep(std::time::Duration::from_millis(500));
 
         println!("Test data inserted successfully");
     }
